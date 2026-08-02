@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   NotoSansJP_400Regular,
   NotoSansJP_700Bold,
@@ -5,19 +6,32 @@ import {
 } from '@expo-google-fonts/noto-sans-jp';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { INITIAL_CERTIFICATIONS } from './src/data/certifications';
+import { CertMainScreen } from './src/screens/CertMainScreen';
 import { CertSelectScreen } from './src/screens/CertSelectScreen';
 import { colors } from './src/theme/colors';
 import type { Certification } from './src/types/certification';
+
+type Screen = 'select' | 'main';
 
 export default function App() {
   const [fontsLoaded] = useFonts({
     NotoSansJP_400Regular,
     NotoSansJP_700Bold,
   });
+  const [screen, setScreen] = useState<Screen>('select');
+  const [certifications, setCertifications] =
+    useState<Certification[]>(INITIAL_CERTIFICATIONS);
+  const [activeCertification, setActiveCertification] =
+    useState<Certification | null>(null);
 
   const handleSelect = (certification: Certification) => {
-    // 次画面（学習モード選択）は後続ブランチで接続する
-    console.log('selected certification:', certification.id);
+    setActiveCertification(certification);
+    setScreen('main');
+  };
+
+  const handleBack = () => {
+    setScreen('select');
   };
 
   if (!fontsLoaded) {
@@ -31,7 +45,15 @@ export default function App() {
 
   return (
     <View style={styles.root}>
-      <CertSelectScreen onSelect={handleSelect} />
+      {screen === 'select' || !activeCertification ? (
+        <CertSelectScreen
+          certifications={certifications}
+          onCertificationsChange={setCertifications}
+          onSelect={handleSelect}
+        />
+      ) : (
+        <CertMainScreen certification={activeCertification} onBack={handleBack} />
+      )}
       <StatusBar style="dark" />
     </View>
   );

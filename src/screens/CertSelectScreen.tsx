@@ -11,11 +11,12 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { INITIAL_CERTIFICATIONS } from '../data/certifications';
 import { colors } from '../theme/colors';
 import type { Certification } from '../types/certification';
 
 type Props = {
+  certifications: Certification[];
+  onCertificationsChange: (next: Certification[]) => void;
   onSelect?: (certification: Certification) => void;
 };
 
@@ -23,9 +24,11 @@ function createId() {
   return `cert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function CertSelectScreen({ onSelect }: Props) {
-  const [certifications, setCertifications] =
-    useState<Certification[]>(INITIAL_CERTIFICATIONS);
+export function CertSelectScreen({
+  certifications,
+  onCertificationsChange,
+  onSelect,
+}: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [draftName, setDraftName] = useState('');
@@ -52,7 +55,7 @@ export function CertSelectScreen({ onSelect }: Props) {
       name: trimmedName,
     };
 
-    setCertifications((prev) => [...prev, next]);
+    onCertificationsChange([...certifications, next]);
     setSelectedId(next.id);
     closeAddModal();
   };

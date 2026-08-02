@@ -9,4 +9,6 @@ export const colors = {
   accentSoft: '#E6F4F3',
   selectedBorder: '#0E7C7B',
   muted: '#627D98',
+  spotlight: '#E4572E',
+  spotlightDeep: '#C2410C',
 };
