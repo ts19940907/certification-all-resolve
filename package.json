@@ -1,0 +1,62 @@
+{
+  "name": "certresolve",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "private": true,
+  "dependencies": {
+    "@expo-google-fonts/noto-sans-jp": "^0.4.3",
+    "@expo/metro-runtime": "~57.0.8",
+    "expo": "~57.0.9",
+    "expo-font": "~57.0.1",
+    "expo-splash-screen": "~57.0.5",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.2",
+    "react-native-web": "^0.21.2"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "concurrently": "^10.0.4",
+    "cross-env": "^10.1.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "~6.0.3",
+    "wait-on": "^9.1.0"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web --port 8081",
+    "desktop": "concurrently -k \"npm run web\" \"wait-on http://127.0.0.1:8081 && cross-env ELECTRON_DEV=1 electron ./electron/main.js\"",
+    "export:web": "expo export --platform web",
+    "desktop:pack": "npm run export:web && electron-builder --mac --win"
+  },
+  "build": {
+    "appId": "com.certresolve.app",
+    "productName": "CertResolve",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.education"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  }
+}
