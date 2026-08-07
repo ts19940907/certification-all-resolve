@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -12,30 +12,53 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {
+  askExampleChat,
   fetchExampleDetail,
+  getAskErrorMessage,
   getExampleErrorMessage,
   shuffleChoices,
 } from '../lib/examplesApi';
+import {
+  insertAiChatHistory,
+  updateAiChatHistory,
+} from '../lib/historiesApi';
 import { colors } from '../theme/colors';
 import {
   isSelectExample,
   type ExampleDetail,
   type SelectAnswer,
 } from '../types/example';
+import type { HistoryChatMessage } from '../types/history';
 
 type Props = {
   visible: boolean;
   exampleId: string | null;
+  certificationId: string;
+  historyId?: string | null;
+  initialMessages?: HistoryChatMessage[];
+  resumeMode?: boolean;
   onClose: () => void;
+  onHistoryChanged?: () => void;
 };
 
 type DisplayChoice = SelectAnswer & { label: string };
+
+type ChatMessage = HistoryChatMessage;
 
 function toChoiceLabel(index: number) {
   return String.fromCharCode('A'.charCodeAt(0) + index);
 }
 
-export function ExampleSolveModal({ visible, exampleId, onClose }: Props) {
+export function ExampleSolveModal({
+  visible,
+  exampleId,
+  certificationId,
+  historyId = null,
+  initialMessages = [],
+  resumeMode = false,
+  onClose,
+  onHistoryChanged,
+}: Props) {
   const { width } = useWindowDimensions();
   const isWide = width >= 720;
   const [loading, setLoading] = useState(false);
@@ -45,7 +68,20 @@ export function ExampleSolveModal({ visible, exampleId, onClose }: Props) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [descriptiveDraft, setDescriptiveDraft] = useState('');
   const [revealed, setRevealed] = useState(false);
-  const [aiNotice, setAiNotice] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatDraft, setChatDraft] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatSending, setChatSending] = useState(false);
+  const [closingBusy, setClosingBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+
+  const initialMessagesRef = useRef(initialMessages);
+  initialMessagesRef.current = initialMessages;
+  const resumeModeRef = useRef(resumeMode);
+  resumeModeRef.current = resumeMode;
+  const historyIdRef = useRef(historyId);
+  historyIdRef.current = historyId;
 
   useEffect(() => {
     if (!visible || !exampleId) {
@@ -54,7 +90,13 @@ export function ExampleSolveModal({ visible, exampleId, onClose }: Props) {
       setSelectedIds([]);
       setDescriptiveDraft('');
       setRevealed(false);
-      setAiNotice(null);
+      setChatOpen(false);
+      setChatDraft('');
+      setChatMessages([]);
+      setChatSending(false);
+      setClosingBusy(false);
+      setNotice(null);
+      setActiveHistoryId(null);
       setError(null);
       setLoading(false);
       return;
@@ -63,20 +105,35 @@ export function ExampleSolveModal({ visible, exampleId, onClose }: Props) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setRevealed(false);
     setSelectedIds([]);
     setDescriptiveDraft('');
+    setChatDraft('');
+    setChatSending(false);
+    setClosingBusy(false);
+    setNotice(null);
+    setActiveHistoryId(historyIdRef.current);
+
+    const shouldResume = resumeModeRef.current;
+    setRevealed(shouldResume);
+    setChatOpen(shouldResume);
+    setChatMessages(shouldResume ? [...initialMessagesRef.current] : []);
 
     void (async () => {
       try {
         const detail = await fetchExampleDetail(exampleId);
         if (cancelled) return;
         setExample(detail);
-        const shuffled = shuffleChoices(detail.choices).map((choice, index) => ({
+        const baseChoices = shouldResume
+          ? detail.choices
+          : shuffleChoices(detail.choices);
+        const labeled = baseChoices.map((choice, index) => ({
           ...choice,
           label: toChoiceLabel(index),
         }));
-        setChoices(shuffled);
+        setChoices(labeled);
+        if (shouldResume) {
+          setSelectedIds(labeled.filter((c) => c.isAnswer).map((c) => c.id));
+        }
       } catch (err) {
         if (cancelled) return;
         setError(getExampleErrorMessage(err, '例題の読み込みに失敗しました。'));
@@ -126,9 +183,356 @@ export function ExampleSolveModal({ visible, exampleId, onClose }: Props) {
     setRevealed(true);
   };
 
-  const handleClose = () => {
-    onClose();
+  const persistHistoryIfNeeded = async () => {
+    if (!example || !exampleId) return;
+    const userCount = chatMessages.filter((m) => m.role === 'user').length;
+    if (userCount === 0) return;
+
+    if (activeHistoryId) {
+      await updateAiChatHistory({
+        historyId: activeHistoryId,
+        exampleId,
+        exampleTitle: example.title,
+        messages: chatMessages,
+      });
+    } else {
+      const createdId = await insertAiChatHistory({
+        certificationId,
+        exampleId,
+        exampleTitle: example.title,
+        messages: chatMessages,
+      });
+      setActiveHistoryId(createdId);
+    }
+    onHistoryChanged?.();
   };
+
+  const handleClose = () => {
+    if (chatSending || closingBusy) return;
+    void (async () => {
+      setClosingBusy(true);
+      try {
+        await persistHistoryIfNeeded();
+      } catch (err) {
+        console.error('[solve] persist history', err);
+        setNotice(
+          getExampleErrorMessage(err, '実施履歴の保存に失敗しました。'),
+        );
+        setClosingBusy(false);
+        return;
+      }
+      setClosingBusy(false);
+      onClose();
+    })();
+  };
+
+  const handleToggleChat = () => {
+    if (chatSending) return;
+    setChatOpen((prev) => !prev);
+  };
+
+  const handleCreateDiagram = () => {
+    setNotice('図解を作成する機能は、次の実装で接続します。');
+  };
+
+  const handleSendChat = () => {
+    const text = chatDraft.trim();
+    if (!text || !example || chatSending) return;
+
+    const userMessage: ChatMessage = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      text,
+    };
+    const nextMessages = [...chatMessages, userMessage];
+    setChatMessages(nextMessages);
+    setChatDraft('');
+    setChatSending(true);
+
+    void (async () => {
+      try {
+        const reply = await askExampleChat({
+          exampleId: example.id,
+          messages: nextMessages.map((m) => ({
+            role: m.role,
+            text: m.text,
+          })),
+        });
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: `a-${Date.now()}`,
+            role: 'assistant',
+            text: reply,
+          },
+        ]);
+      } catch (err) {
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: `a-${Date.now()}`,
+            role: 'assistant',
+            text: getAskErrorMessage(err),
+          },
+        ]);
+      } finally {
+        setChatSending(false);
+      }
+    })();
+  };
+
+  const showChatSide = chatOpen && isWide;
+  const closeLocked = chatSending || closingBusy;
+
+  const examplePanel = example ? (
+    <View style={styles.panel}>
+      <View style={styles.panelHeader}>
+        <View style={styles.panelIcon}>
+          <Text style={styles.panelIconLabel}>例</Text>
+        </View>
+        <Text style={styles.panelTitle}>例題</Text>
+      </View>
+
+      {example.title ? (
+        <Text style={styles.exampleTitle}>{example.title}</Text>
+      ) : null}
+
+      <Text style={styles.questionText}>Q. {example.question}</Text>
+
+      {isSelect ? (
+        <View style={styles.choiceList}>
+          {choices.map((choice) => {
+            const selected = selectedIds.includes(choice.id);
+            const showCorrect = revealed && choice.isAnswer;
+            const showWrong = revealed && selected && !choice.isAnswer;
+            return (
+              <Pressable
+                key={choice.id}
+                accessibilityRole={isMultiple ? 'checkbox' : 'radio'}
+                accessibilityState={{
+                  selected,
+                  checked: selected,
+                }}
+                disabled={revealed}
+                onPress={() => toggleChoice(choice.id)}
+                style={[
+                  styles.choiceRow,
+                  selected && !revealed && styles.choiceRowSelected,
+                  showCorrect && styles.choiceRowCorrect,
+                  showWrong && styles.choiceRowWrong,
+                ]}
+              >
+                <View
+                  style={[
+                    styles.choiceMark,
+                    selected && styles.choiceMarkSelected,
+                    showCorrect && styles.choiceMarkCorrect,
+                  ]}
+                >
+                  {isMultiple ? (
+                    <Text
+                      style={[
+                        styles.choiceMarkText,
+                        selected && styles.choiceMarkTextSelected,
+                      ]}
+                    >
+                      {selected ? '✓' : ''}
+                    </Text>
+                  ) : (
+                    <View
+                      style={[
+                        styles.radioDot,
+                        selected && styles.radioDotSelected,
+                      ]}
+                    />
+                  )}
+                </View>
+                <Text style={styles.choiceLabel}>{choice.label}.</Text>
+                <Text style={styles.choiceValue}>{choice.value}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : (
+        <View style={styles.descriptiveWrap}>
+          <Text style={styles.fieldHint}>
+            {revealed ? '模範解答' : '解答を入力してください'}
+          </Text>
+          {revealed ? (
+            <Text style={styles.modelAnswer}>{example.answer}</Text>
+          ) : (
+            <TextInput
+              value={descriptiveDraft}
+              onChangeText={setDescriptiveDraft}
+              placeholder="ここに解答を書く"
+              placeholderTextColor={colors.muted}
+              style={styles.descriptiveInput}
+              multiline
+              textAlignVertical="top"
+            />
+          )}
+          {revealed && descriptiveDraft.trim() ? (
+            <View style={styles.yourAnswerBox}>
+              <Text style={styles.yourAnswerLabel}>あなたの解答</Text>
+              <Text style={styles.yourAnswerText}>
+                {descriptiveDraft.trim()}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      )}
+
+      {revealed && isSelect ? (
+        <View style={styles.answerBadge}>
+          <Text style={styles.answerBadgeLabel}>
+            正解: {correctLabels || '—'}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  ) : null;
+
+  const explainPanel =
+    example && revealed ? (
+      <View style={styles.panel}>
+        <View style={styles.panelHeader}>
+          <View style={styles.panelIcon}>
+            <Text style={styles.panelIconLabel}>解</Text>
+          </View>
+          <Text style={styles.panelTitle}>解説</Text>
+        </View>
+        <Text style={styles.explainBody}>
+          {example.explanation || '解説はまだありません。'}
+        </Text>
+        <View style={styles.actionRow}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={handleCreateDiagram}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              pressed && styles.secondaryButtonPressed,
+            ]}
+          >
+            <Text style={styles.secondaryButtonLabel}>図解を作成</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            disabled={chatSending}
+            onPress={handleToggleChat}
+            style={({ pressed }) => [
+              chatOpen ? styles.closeChatButton : styles.aiButton,
+              pressed &&
+                !chatSending &&
+                (chatOpen
+                  ? styles.closeChatButtonPressed
+                  : styles.aiButtonPressed),
+              chatSending && styles.aiButtonDisabled,
+            ]}
+          >
+            <Text
+              style={
+                chatOpen ? styles.closeChatButtonLabel : styles.aiButtonLabel
+              }
+            >
+              {chatOpen ? '質問を閉じる' : 'AIに質問する'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    ) : null;
+
+  const chatPanel = chatOpen ? (
+    <View style={styles.chatPaneInner}>
+      <View style={styles.chatHeader}>
+        <View style={styles.chatHeaderIcon}>
+          <Text style={styles.chatHeaderIconLabel}>AI</Text>
+        </View>
+        <Text style={styles.chatHeaderTitle}>この例題についてAIに質問</Text>
+      </View>
+
+      <ScrollView
+        style={styles.chatMessages}
+        contentContainerStyle={styles.chatMessagesContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {chatMessages.length === 0 ? (
+          <Text style={styles.chatEmpty}>
+            解説を読んでもわからない点を質問できます。
+          </Text>
+        ) : (
+          chatMessages.map((message) => (
+            <View
+              key={message.id}
+              style={[
+                styles.chatBubble,
+                message.role === 'user'
+                  ? styles.chatBubbleUser
+                  : styles.chatBubbleAssistant,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.chatBubbleRole,
+                  message.role === 'user' && styles.chatBubbleRoleUser,
+                ]}
+              >
+                {message.role === 'user' ? 'あなた' : 'AIアシスタント'}
+              </Text>
+              <Text
+                style={[
+                  styles.chatBubbleText,
+                  message.role === 'user' && styles.chatBubbleTextUser,
+                ]}
+              >
+                {message.text}
+              </Text>
+            </View>
+          ))
+        )}
+        {chatSending ? (
+          <View style={styles.chatThinking}>
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={styles.chatThinkingLabel}>考え中…</Text>
+          </View>
+        ) : null}
+      </ScrollView>
+
+      <View style={styles.chatComposer}>
+        <TextInput
+          value={chatDraft}
+          onChangeText={setChatDraft}
+          placeholder="関連する疑問を入力..."
+          placeholderTextColor={colors.muted}
+          style={styles.chatInput}
+          multiline
+          editable={!chatSending}
+          textAlignVertical="top"
+          onSubmitEditing={handleSendChat}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="送信"
+          disabled={!chatDraft.trim() || chatSending}
+          onPress={handleSendChat}
+          style={({ pressed }) => [
+            styles.chatSendButton,
+            pressed && styles.chatSendButtonPressed,
+            (!chatDraft.trim() || chatSending) && styles.chatSendButtonDisabled,
+          ]}
+        >
+          <Text
+            style={[
+              styles.chatSendLabel,
+              (!chatDraft.trim() || chatSending) && styles.chatSendLabelDisabled,
+            ]}
+          >
+            送信
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  ) : null;
 
   return (
     <Modal
@@ -138,174 +542,98 @@ export function ExampleSolveModal({ visible, exampleId, onClose }: Props) {
       onRequestClose={handleClose}
     >
       <View style={styles.overlay}>
-        <Pressable style={styles.backdrop} onPress={handleClose} />
-        <View style={[styles.card, isWide ? styles.cardWide : styles.cardNarrow]}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => {
+            if (!closeLocked) handleClose();
+          }}
+        />
+        <View
+          style={[
+            styles.card,
+            (revealed || chatOpen) && styles.cardTall,
+            chatOpen
+              ? isWide
+                ? styles.cardExpandedWide
+                : styles.cardExpandedNarrow
+              : isWide
+                ? styles.cardWide
+                : styles.cardNarrow,
+          ]}
+        >
           <View style={styles.header}>
             <Text style={styles.title}>例題を解く</Text>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="閉じる"
+              disabled={closeLocked}
               onPress={handleClose}
               style={({ pressed }) => [
                 styles.closeButton,
-                pressed && styles.closeButtonPressed,
+                pressed && !closeLocked && styles.closeButtonPressed,
+                closeLocked && styles.closeButtonDisabled,
               ]}
             >
               <Text style={styles.closeLabel}>×</Text>
             </Pressable>
           </View>
 
-          <ScrollView
-            style={styles.bodyScroll}
-            contentContainerStyle={styles.bodyContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {loading ? (
-              <View style={styles.centerBox}>
-                <ActivityIndicator size="large" color={colors.accent} />
-                <Text style={styles.centerText}>読み込み中…</Text>
+          {loading ? (
+            <View style={styles.centerBox}>
+              <ActivityIndicator size="large" color={colors.accent} />
+              <Text style={styles.centerText}>読み込み中…</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.centerBox}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : example ? (
+            <View
+              style={[
+                styles.bodyRow,
+                (revealed || chatOpen) && styles.bodyRowFlex,
+                showChatSide ? styles.bodyRowSplit : styles.bodyRowStack,
+              ]}
+            >
+              <View
+                style={
+                  showChatSide
+                    ? styles.halfPane
+                    : chatOpen
+                      ? styles.mainPaneStacked
+                      : styles.mainPaneAlone
+                }
+              >
+                <ScrollView
+                  style={
+                    revealed || chatOpen
+                      ? styles.scrollFill
+                      : styles.scrollAuto
+                  }
+                  contentContainerStyle={[
+                    styles.bodyContent,
+                    !showChatSide && styles.bodyContentPadded,
+                  ]}
+                  showsVerticalScrollIndicator
+                  keyboardShouldPersistTaps="handled"
+                  nestedScrollEnabled
+                >
+                  {examplePanel}
+                  {explainPanel}
+                </ScrollView>
               </View>
-            ) : error ? (
-              <View style={styles.centerBox}>
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            ) : example ? (
-              <View style={styles.panel}>
-                <View style={styles.panelHeader}>
-                  <View style={styles.panelIcon}>
-                    <Text style={styles.panelIconLabel}>例</Text>
-                  </View>
-                  <Text style={styles.panelTitle}>例題</Text>
+              {chatOpen ? (
+                <View
+                  style={[
+                    styles.chatPane,
+                    showChatSide ? styles.halfPane : styles.chatPaneStacked,
+                  ]}
+                >
+                  {chatPanel}
                 </View>
-
-                {example.title ? (
-                  <Text style={styles.exampleTitle}>{example.title}</Text>
-                ) : null}
-
-                <Text style={styles.questionText}>Q. {example.question}</Text>
-
-                {isSelect ? (
-                  <View style={styles.choiceList}>
-                    {choices.map((choice) => {
-                      const selected = selectedIds.includes(choice.id);
-                      const showCorrect = revealed && choice.isAnswer;
-                      const showWrong =
-                        revealed && selected && !choice.isAnswer;
-                      return (
-                        <Pressable
-                          key={choice.id}
-                          accessibilityRole={
-                            isMultiple ? 'checkbox' : 'radio'
-                          }
-                          accessibilityState={{
-                            selected,
-                            checked: selected,
-                          }}
-                          disabled={revealed}
-                          onPress={() => toggleChoice(choice.id)}
-                          style={[
-                            styles.choiceRow,
-                            selected && !revealed && styles.choiceRowSelected,
-                            showCorrect && styles.choiceRowCorrect,
-                            showWrong && styles.choiceRowWrong,
-                          ]}
-                        >
-                          <View
-                            style={[
-                              styles.choiceMark,
-                              selected && styles.choiceMarkSelected,
-                              showCorrect && styles.choiceMarkCorrect,
-                            ]}
-                          >
-                            {isMultiple ? (
-                              <Text
-                                style={[
-                                  styles.choiceMarkText,
-                                  selected && styles.choiceMarkTextSelected,
-                                ]}
-                              >
-                                {selected ? '✓' : ''}
-                              </Text>
-                            ) : (
-                              <View
-                                style={[
-                                  styles.radioDot,
-                                  selected && styles.radioDotSelected,
-                                ]}
-                              />
-                            )}
-                          </View>
-                          <Text style={styles.choiceLabel}>{choice.label}.</Text>
-                          <Text style={styles.choiceValue}>{choice.value}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ) : (
-                  <View style={styles.descriptiveWrap}>
-                    <Text style={styles.fieldHint}>
-                      {revealed ? '模範解答' : '解答を入力してください'}
-                    </Text>
-                    {revealed ? (
-                      <Text style={styles.modelAnswer}>{example.answer}</Text>
-                    ) : (
-                      <TextInput
-                        value={descriptiveDraft}
-                        onChangeText={setDescriptiveDraft}
-                        placeholder="ここに解答を書く"
-                        placeholderTextColor={colors.muted}
-                        style={styles.descriptiveInput}
-                        multiline
-                        textAlignVertical="top"
-                      />
-                    )}
-                    {revealed && descriptiveDraft.trim() ? (
-                      <View style={styles.yourAnswerBox}>
-                        <Text style={styles.yourAnswerLabel}>あなたの解答</Text>
-                        <Text style={styles.yourAnswerText}>
-                          {descriptiveDraft.trim()}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                )}
-
-                {revealed && isSelect ? (
-                  <View style={styles.answerBadge}>
-                    <Text style={styles.answerBadgeLabel}>
-                      正解: {correctLabels || '—'}
-                    </Text>
-                  </View>
-                ) : null}
-
-                {revealed ? (
-                  <View style={styles.afterSolve}>
-                    <View style={styles.explainBlock}>
-                      <Text style={styles.explainTitle}>解説</Text>
-                      <Text style={styles.explainBody}>
-                        {example.explanation || '解説はまだありません。'}
-                      </Text>
-                    </View>
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() =>
-                        setAiNotice(
-                          'この例題についてAIに質問する機能は、次の実装で接続します。',
-                        )
-                      }
-                      style={({ pressed }) => [
-                        styles.aiButton,
-                        pressed && styles.aiButtonPressed,
-                      ]}
-                    >
-                      <Text style={styles.aiButtonLabel}>AIに質問する</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-          </ScrollView>
+              ) : null}
+            </View>
+          ) : null}
 
           {!revealed && example && !loading && !error ? (
             <View style={styles.footer}>
@@ -334,19 +662,19 @@ export function ExampleSolveModal({ visible, exampleId, onClose }: Props) {
       </View>
 
       <Modal
-        visible={aiNotice != null}
+        visible={notice != null}
         transparent
         animationType="fade"
-        onRequestClose={() => setAiNotice(null)}
+        onRequestClose={() => setNotice(null)}
       >
         <View style={styles.noticeOverlay}>
-          <Pressable style={styles.backdrop} onPress={() => setAiNotice(null)} />
+          <Pressable style={styles.backdrop} onPress={() => setNotice(null)} />
           <View style={styles.noticeCard}>
             <Text style={styles.noticeTitle}>お知らせ</Text>
-            <Text style={styles.noticeBody}>{aiNotice}</Text>
+            <Text style={styles.noticeBody}>{notice}</Text>
             <Pressable
               accessibilityRole="button"
-              onPress={() => setAiNotice(null)}
+              onPress={() => setNotice(null)}
               style={({ pressed }) => [
                 styles.primaryButton,
                 pressed && styles.primaryButtonPressed,
@@ -380,12 +708,22 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     alignSelf: 'center',
     width: '100%',
+    flexDirection: 'column',
+  },
+  cardTall: {
+    height: '92%',
   },
   cardWide: {
     maxWidth: 560,
   },
   cardNarrow: {
     maxWidth: 520,
+  },
+  cardExpandedWide: {
+    maxWidth: 980,
+  },
+  cardExpandedNarrow: {
+    maxWidth: 560,
   },
   header: {
     flexDirection: 'row',
@@ -411,19 +749,68 @@ const styles = StyleSheet.create({
   closeButtonPressed: {
     backgroundColor: '#c40e07',
   },
+  closeButtonDisabled: {
+    opacity: 0.45,
+  },
   closeLabel: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 20,
     color: colors.paper,
     marginTop: -2,
   },
-  bodyScroll: {
+  bodyRow: {
+    flexShrink: 1,
+    minHeight: 0,
+  },
+  bodyRowFlex: {
+    flex: 1,
+  },
+  bodyRowSplit: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    gap: 12,
+  },
+  bodyRowStack: {
+    flexDirection: 'column',
+  },
+  halfPane: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  mainPaneAlone: {
     flexGrow: 0,
+    flexShrink: 1,
+    minHeight: 0,
+  },
+  mainPaneStacked: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  scrollFill: {
+    flex: 1,
+    minHeight: 0,
+    ...(Platform.OS === 'web' ? ({ overflow: 'auto' } as object) : null),
+  },
+  scrollAuto: {
+    flexGrow: 0,
+    flexShrink: 1,
   },
   bodyContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 4,
     paddingTop: 8,
     paddingBottom: 12,
+    gap: 12,
+    flexGrow: 0,
+  },
+  bodyContentPadded: {
+    paddingHorizontal: 20,
   },
   centerBox: {
     paddingVertical: 40,
@@ -622,26 +1009,37 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.accentDeep,
   },
-  afterSolve: {
-    marginTop: 18,
-    gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-    paddingTop: 16,
-  },
-  explainBlock: {
-    gap: 8,
-  },
-  explainTitle: {
-    fontFamily: 'NotoSansJP_700Bold',
-    fontSize: 16,
-    color: colors.ink,
-  },
   explainBody: {
     fontFamily: 'NotoSansJP_400Regular',
     fontSize: 14,
     lineHeight: 22,
     color: colors.inkSoft,
+    marginBottom: 16,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 16,
+  },
+  secondaryButton: {
+    backgroundColor: colors.paper,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    borderRadius: 12,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    flexGrow: 1,
+  },
+  secondaryButtonPressed: {
+    backgroundColor: colors.accentSoft,
+  },
+  secondaryButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.accentDeep,
   },
   aiButton: {
     backgroundColor: colors.accent,
@@ -650,14 +1048,193 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
+    flexGrow: 1,
   },
   aiButtonPressed: {
     backgroundColor: colors.accentDeep,
+  },
+  aiButtonDisabled: {
+    opacity: 0.55,
   },
   aiButtonLabel: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 14,
     color: colors.paper,
+  },
+  closeChatButton: {
+    backgroundColor: colors.mist,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    borderRadius: 12,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    flexGrow: 1,
+  },
+  closeChatButtonPressed: {
+    backgroundColor: colors.line,
+  },
+  closeChatButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.inkSoft,
+  },
+  chatPane: {
+    backgroundColor: colors.mist,
+    borderColor: colors.line,
+    borderWidth: 1,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  chatPaneStacked: {
+    height: 300,
+    flexGrow: 0,
+    flexShrink: 0,
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
+  chatPaneInner: {
+    flex: 1,
+    minHeight: 0,
+  },
+  chatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+    backgroundColor: colors.paper,
+  },
+  chatHeaderIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatHeaderIconLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 11,
+    color: colors.paper,
+  },
+  chatHeaderTitle: {
+    flex: 1,
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 15,
+    color: colors.ink,
+  },
+  chatMessages: {
+    flex: 1,
+    minHeight: 140,
+  },
+  chatMessagesContent: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  chatEmpty: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.muted,
+    paddingVertical: 12,
+  },
+  chatThinking: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+  },
+  chatThinkingLabel: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    color: colors.inkSoft,
+  },
+  chatBubble: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    maxWidth: '92%',
+  },
+  chatBubbleUser: {
+    alignSelf: 'flex-end',
+    backgroundColor: colors.accent,
+  },
+  chatBubbleAssistant: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.paper,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  chatBubbleRole: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 11,
+    color: colors.muted,
+    marginBottom: 4,
+  },
+  chatBubbleRoleUser: {
+    color: 'rgba(255, 255, 255, 0.85)',
+  },
+  chatBubbleText: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.ink,
+  },
+  chatBubbleTextUser: {
+    color: colors.paper,
+  },
+  chatComposer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    backgroundColor: colors.paper,
+  },
+  chatInput: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    borderRadius: 12,
+    minHeight: 44,
+    maxHeight: 100,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === 'web' ? 10 : 10,
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 14,
+    color: colors.ink,
+    backgroundColor: colors.mist,
+  },
+  chatSendButton: {
+    backgroundColor: colors.accent,
+    borderRadius: 12,
+    minHeight: 44,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatSendButtonPressed: {
+    backgroundColor: colors.accentDeep,
+  },
+  chatSendButtonDisabled: {
+    backgroundColor: colors.line,
+  },
+  chatSendLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.paper,
+  },
+  chatSendLabelDisabled: {
+    color: colors.muted,
   },
   footer: {
     borderTopWidth: 1,

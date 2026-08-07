@@ -88,7 +88,21 @@ supabase functions deploy validate-certification
    - 1件に絞れない／特定不能／対応形式なしは登録・改名を拒否
    - 改名時も正式名称と出題形式レンジを更新（例題・履歴がある資格は従来どおり改名不可）
 
+## 例題へのAI質問
+
+既存の Gemini シークレット（`GEMINI_API_KEY` / 任意で `GEMINI_MODEL`）を使い、次をデプロイ:
+
+```bash
+supabase functions deploy ask-example
+```
+
+- 答え合わせ後の「AIに質問する」からチャット可能
+- やり取りがある状態でダイアログを閉じると `histories`（`kind=example_ai_chat`）に保存
+- 実施履歴の「詳細」から同じ例題＋チャットを再開（同じ履歴行を更新）
+
 ## 例題の削除
 
 SQL Editor で `migrations/20260807160000_fix_example_delete.sql` を Run。  
 （削除時の trigger 不整合修正 + `delete_example` RPC）
+
+削除すると、その例題に紐づくAIチャット履歴は再開できなくなります（履歴行自体は残ります）。

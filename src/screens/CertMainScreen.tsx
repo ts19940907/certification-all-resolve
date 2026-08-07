@@ -14,40 +14,31 @@ import { ExampleCreateModal } from '../components/ExampleCreateModal';
 import { ExampleSolveModal } from '../components/ExampleSolveModal';
 import { deleteExample, fetchExamples } from '../lib/examplesApi';
 import { getErrorMessage } from '../lib/certificationsApi';
+import {
+  exampleExists,
+  fetchHistories,
+  getHistoryErrorMessage,
+} from '../lib/historiesApi';
 import { colors } from '../theme/colors';
 import type { Certification } from '../types/certification';
 import type { ExampleSummary } from '../types/example';
+import type { HistoryChatMessage, HistorySummary } from '../types/history';
 
 type Props = {
   certification: Certification;
   onBack: () => void;
 };
 
+type SolveSession = {
+  exampleId: string;
+  historyId: string | null;
+  initialMessages: HistoryChatMessage[];
+  resumeMode: boolean;
+};
+
 const MIN_QUESTION_COUNT = 10;
 const MAX_QUESTION_COUNT = 25;
 const DEFAULT_QUESTION_COUNT = 10;
-
-/** 新しい順。本実装では実施日時でソートする */
-const PLACEHOLDER_HISTORY = [
-  {
-    id: 'hist-3',
-    title: '本番試験（仮）',
-    performedAt: '2026-08-02 21:40',
-    summary: 'スコア 78点',
-  },
-  {
-    id: 'hist-2',
-    title: '例題を解く（仮）',
-    performedAt: '2026-08-01 19:12',
-    summary: '正解 8 / 10',
-  },
-  {
-    id: 'hist-1',
-    title: 'キーワードレビュー（仮）',
-    performedAt: '2026-07-30 08:05',
-    summary: '理解度 B',
-  },
-];
 
 function clampQuestionCount(value: number) {
   return Math.min(MAX_QUESTION_COUNT, Math.max(MIN_QUESTION_COUNT, value));
@@ -61,13 +52,16 @@ export function CertMainScreen({ certification, onBack }: Props) {
     String(DEFAULT_QUESTION_COUNT),
   );
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [solveExampleId, setSolveExampleId] = useState<string | null>(null);
+  const [solveSession, setSolveSession] = useState<SolveSession | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ExampleSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [examples, setExamples] = useState<ExampleSummary[]>([]);
   const [examplesError, setExamplesError] = useState<string | null>(null);
   const [examplesLoading, setExamplesLoading] = useState(true);
+  const [histories, setHistories] = useState<HistorySummary[]>([]);
+  const [historiesError, setHistoriesError] = useState<string | null>(null);
+  const [historiesLoading, setHistoriesLoading] = useState(true);
 
   const loadExamples = useCallback(async () => {
     setExamplesLoading(true);
@@ -82,25 +76,83 @@ export function CertMainScreen({ certification, onBack }: Props) {
     }
   }, [certification.id]);
 
+  const loadHistories = useCallback(async () => {
+    setHistoriesLoading(true);
+    setHistoriesError(null);
+    try {
+      const rows = await fetchHistories(certification.id);
+      setHistories(rows);
+    } catch (error) {
+      setHistoriesError(
+        getHistoryErrorMessage(error, '実施履歴の取得に失敗しました'),
+      );
+    } finally {
+      setHistoriesLoading(false);
+    }
+  }, [certification.id]);
+
   useEffect(() => {
     void loadExamples();
   }, [loadExamples]);
+
+  useEffect(() => {
+    void loadHistories();
+  }, [loadHistories]);
+
+  const openSolve = (exampleId: string) => {
+    setSolveSession({
+      exampleId,
+      historyId: null,
+      initialMessages: [],
+      resumeMode: false,
+    });
+  };
+
+  const openHistoryDetail = async (item: HistorySummary) => {
+    if (item.kind !== 'example_ai_chat' || !item.detail?.example_id) {
+      setNoticeMessage('この履歴の詳細表示にはまだ対応していません。');
+      return;
+    }
+    try {
+      const exists = await exampleExists(item.detail.example_id);
+      if (!exists) {
+        setNoticeMessage(
+          'この例題は削除されているため、チャットを再開できません。',
+        );
+        return;
+      }
+      setSolveSession({
+        exampleId: item.detail.example_id,
+        historyId: item.id,
+        initialMessages: item.detail.messages,
+        resumeMode: true,
+      });
+    } catch (error) {
+      setNoticeMessage(
+        getHistoryErrorMessage(error, '履歴の詳細を開けませんでした。'),
+      );
+    }
+  };
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget || deleteBusy) return;
     setDeleteBusy(true);
     try {
       await deleteExample(deleteTarget.id);
-      if (solveExampleId === deleteTarget.id) {
-        setSolveExampleId(null);
+      if (solveSession?.exampleId === deleteTarget.id) {
+        setSolveSession(null);
       }
       setDeleteTarget(null);
       await loadExamples();
+      await loadHistories();
     } catch (error) {
       console.error('[CertMainScreen] delete', error);
       setDeleteTarget(null);
       setNoticeMessage(
-        getErrorMessage(error, '例題の削除に失敗しました。時間をおいて再度お試しください。'),
+        getErrorMessage(
+          error,
+          '例題の削除に失敗しました。時間をおいて再度お試しください。',
+        ),
       );
     } finally {
       setDeleteBusy(false);
@@ -219,26 +271,42 @@ export function CertMainScreen({ certification, onBack }: Props) {
               contentContainerStyle={styles.panelScrollContent}
               showsVerticalScrollIndicator
             >
-              {PLACEHOLDER_HISTORY.map((item) => (
-                <View key={item.id} style={styles.historyRow}>
-                  <View style={styles.historyMain}>
-                    <Text style={styles.historyTime}>{item.performedAt}</Text>
-                    <Text style={styles.historyTitle} numberOfLines={2}>
-                      {item.title}
-                    </Text>
-                    <Text style={styles.historySummary}>{item.summary}</Text>
-                  </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    style={({ pressed }) => [
-                      styles.historyDetailButton,
-                      pressed && styles.historyDetailButtonPressed,
-                    ]}
-                  >
-                    <Text style={styles.historyDetailButtonLabel}>詳細</Text>
-                  </Pressable>
+              {historiesLoading ? (
+                <View style={styles.historyEmptyBox}>
+                  <ActivityIndicator color={colors.accent} />
+                  <Text style={styles.historyEmptyText}>読み込み中…</Text>
                 </View>
-              ))}
+              ) : historiesError ? (
+                <Text style={styles.historyEmptyText}>{historiesError}</Text>
+              ) : histories.length === 0 ? (
+                <Text style={styles.historyEmptyText}>
+                  まだ実施履歴はありません
+                </Text>
+              ) : (
+                histories.map((item) => (
+                  <View key={item.id} style={styles.historyRow}>
+                    <View style={styles.historyMain}>
+                      <Text style={styles.historyTime}>{item.performedAt}</Text>
+                      <Text style={styles.historyTitle} numberOfLines={2}>
+                        {item.title}
+                      </Text>
+                      <Text style={styles.historySummary}>{item.summary}</Text>
+                    </View>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        void openHistoryDetail(item);
+                      }}
+                      style={({ pressed }) => [
+                        styles.historyDetailButton,
+                        pressed && styles.historyDetailButtonPressed,
+                      ]}
+                    >
+                      <Text style={styles.historyDetailButtonLabel}>詳細</Text>
+                    </Pressable>
+                  </View>
+                ))
+              )}
             </ScrollView>
           </View>
 
@@ -303,7 +371,7 @@ export function CertMainScreen({ certification, onBack }: Props) {
                     <View style={styles.exampleActions}>
                       <Pressable
                         accessibilityRole="button"
-                        onPress={() => setSolveExampleId(example.id)}
+                        onPress={() => openSolve(example.id)}
                         style={({ pressed }) => [
                           styles.rowAction,
                           pressed && styles.rowActionPressed,
@@ -389,9 +457,16 @@ export function CertMainScreen({ certification, onBack }: Props) {
       />
 
       <ExampleSolveModal
-        visible={solveExampleId != null}
-        exampleId={solveExampleId}
-        onClose={() => setSolveExampleId(null)}
+        visible={solveSession != null}
+        exampleId={solveSession?.exampleId ?? null}
+        certificationId={certification.id}
+        historyId={solveSession?.historyId ?? null}
+        initialMessages={solveSession?.initialMessages ?? []}
+        resumeMode={solveSession?.resumeMode ?? false}
+        onClose={() => setSolveSession(null)}
+        onHistoryChanged={() => {
+          void loadHistories();
+        }}
       />
 
       <Modal
@@ -413,6 +488,8 @@ export function CertMainScreen({ certification, onBack }: Props) {
             <Text style={styles.modalTitle}>例題を削除しますか？</Text>
             <Text style={styles.modalLead}>
               「{deleteTarget?.title}」を削除します。この操作は取り消せません。
+              {'\n'}
+              削除すると、この例題に関するAIチャット履歴は再開・閲覧できなくなります。
             </Text>
             <View style={styles.modalActions}>
               <Pressable
@@ -739,6 +816,17 @@ const styles = StyleSheet.create({
   panelScrollContent: {
     gap: 10,
     paddingBottom: 8,
+  },
+  historyEmptyBox: {
+    paddingVertical: 24,
+    alignItems: 'center',
+    gap: 10,
+  },
+  historyEmptyText: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.muted,
   },
   historyRow: {
     flexDirection: 'row',

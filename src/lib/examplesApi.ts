@@ -205,3 +205,47 @@ export function getGenerateErrorMessage(error: unknown) {
 export function getExampleErrorMessage(error: unknown, fallback: string) {
   return getErrorMessage(error, fallback);
 }
+
+type AskEdgeSuccess = {
+  ok: true;
+  reply: string;
+};
+
+type AskEdgeFailure = {
+  ok: false;
+  error?: string;
+};
+
+/** 例題についてAIに質問（直近のやり取りを含む） */
+export async function askExampleChat(args: {
+  exampleId: string;
+  messages: Array<{ role: 'user' | 'assistant'; text: string }>;
+}): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('ask-example', {
+    body: {
+      example_id: args.exampleId,
+      messages: args.messages,
+    },
+  });
+
+  const payload = (data ?? null) as AskEdgeSuccess | AskEdgeFailure | null;
+
+  if (payload && 'ok' in payload && payload.ok === true) {
+    return payload.reply;
+  }
+
+  if (payload && 'ok' in payload && payload.ok === false) {
+    throw new Error(payload.error || 'AIへの質問に失敗しました');
+  }
+
+  if (error) {
+    console.error('[examples] ask-example invoke', error);
+    throw error;
+  }
+
+  throw new Error('AIへの質問に失敗しました');
+}
+
+export function getAskErrorMessage(error: unknown) {
+  return getErrorMessage(error, 'AIへの質問に失敗しました');
+}
