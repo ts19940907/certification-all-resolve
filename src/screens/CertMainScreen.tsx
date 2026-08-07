@@ -9,6 +9,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { ExampleCreateModal } from '../components/ExampleCreateModal';
+import { ExampleSolveModal } from '../components/ExampleSolveModal';
 import { fetchExamples } from '../lib/examplesApi';
 import { getErrorMessage } from '../lib/certificationsApi';
 import { colors } from '../theme/colors';
@@ -58,6 +59,7 @@ export function CertMainScreen({ certification, onBack }: Props) {
     String(DEFAULT_QUESTION_COUNT),
   );
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [solveExampleId, setSolveExampleId] = useState<string | null>(null);
   const [examples, setExamples] = useState<ExampleSummary[]>([]);
   const [examplesError, setExamplesError] = useState<string | null>(null);
   const [examplesLoading, setExamplesLoading] = useState(true);
@@ -275,6 +277,7 @@ export function CertMainScreen({ certification, onBack }: Props) {
                     <View style={styles.exampleActions}>
                       <Pressable
                         accessibilityRole="button"
+                        onPress={() => setSolveExampleId(example.id)}
                         style={({ pressed }) => [
                           styles.rowAction,
                           pressed && styles.rowActionPressed,
@@ -355,6 +358,12 @@ export function CertMainScreen({ certification, onBack }: Props) {
         onGenerated={() => {
           void loadExamples();
         }}
+      />
+
+      <ExampleSolveModal
+        visible={solveExampleId != null}
+        exampleId={solveExampleId}
+        onClose={() => setSolveExampleId(null)}
       />
     </View>
   );
@@ -674,9 +683,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     backgroundColor: colors.mist,
-    gap: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   exampleTitle: {
+    flex: 1,
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 15,
     color: colors.ink,
@@ -684,7 +697,9 @@ const styles = StyleSheet.create({
   exampleActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'flex-end',
     gap: 8,
+    flexShrink: 0,
   },
   rowAction: {
     borderRadius: 10,

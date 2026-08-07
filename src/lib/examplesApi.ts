@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { getErrorMessage } from './certificationsApi';
-import type { ExampleSummary } from '../types/example';
+import type { ExampleDetail, ExampleSummary, SelectAnswer } from '../types/example';
 
 export type GenerateExampleResult = {
   id: string;
@@ -18,11 +18,27 @@ type EdgeFailure = {
   error?: string;
 };
 
+type SelectAnswerRow = {
+  id: string;
+  value: string;
+  is_answer: boolean;
+  reason: string;
+};
+
 function isAbortError(error: unknown) {
   return (
     (error instanceof DOMException && error.name === 'AbortError') ||
     (error instanceof Error && error.name === 'AbortError')
   );
+}
+
+function mapChoice(row: SelectAnswerRow): SelectAnswer {
+  return {
+    id: row.id,
+    value: row.value,
+    isAnswer: row.is_answer,
+    reason: row.reason ?? '',
+  };
 }
 
 export async function fetchExamples(
@@ -43,6 +59,62 @@ export async function fetchExamples(
     id: row.id as string,
     title: row.title as string,
   }));
+}
+
+export async function fetchExampleDetail(
+  exampleId: string,
+): Promise<ExampleDetail> {
+  const { data, error } = await supabase
+    .from('examples')
+    .select(
+      `
+      id,
+      title,
+      question,
+      answer,
+      explanation,
+      select_answer (
+        id,
+        value,
+        is_answer,
+        reason
+      )
+    `,
+    )
+    .eq('id', exampleId)
+    .single();
+
+  if (error) {
+    console.error('[examples] detail', error);
+    throw error;
+  }
+
+  const choicesRaw = Array.isArray(data.select_answer)
+    ? (data.select_answer as SelectAnswerRow[])
+    : data.select_answer
+      ? [data.select_answer as SelectAnswerRow]
+      : [];
+
+  return {
+    id: data.id as string,
+    title: data.title as string,
+    question: data.question as string,
+    answer: (data.answer as string) ?? '',
+    explanation: (data.explanation as string) ?? '',
+    choices: choicesRaw.map(mapChoice),
+  };
+}
+
+/** Fisher–Yates */
+export function shuffleChoices<T>(items: T[]): T[] {
+  const next = [...items];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = next[i]!;
+    next[i] = next[j]!;
+    next[j] = tmp;
+  }
+  return next;
 }
 
 /**
@@ -86,7 +158,6 @@ export async function generateExampleAuto(args: {
       continue;
     }
 
-    // data が取れない場合（ネットワーク等）は再試行
     if (error) {
       console.error('[examples] generate invoke', error);
     }
@@ -117,4 +188,8 @@ export function getGenerateErrorMessage(error: unknown) {
     return '作成をキャンセルしました';
   }
   return getErrorMessage(error, '例題の生成に失敗しました');
+}
+
+export function getExampleErrorMessage(error: unknown, fallback: string) {
+  return getErrorMessage(error, fallback);
 }

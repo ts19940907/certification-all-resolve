@@ -41,3 +41,24 @@ export type ExampleSummary = {
   id: string;
   title: string;
 };
+
+export type SelectAnswer = {
+  id: string;
+  value: string;
+  isAnswer: boolean;
+  reason: string;
+};
+
+export type ExampleDetail = {
+  id: string;
+  title: string;
+  question: string;
+  answer: string;
+  explanation: string;
+  choices: SelectAnswer[];
+};
+
+/** answer が空なら選択式、否则記述式 */
+export function isSelectExample(example: Pick<ExampleDetail, 'answer'>) {
+  return example.answer.trim().length === 0;
+}
