@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -11,32 +12,32 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import {
+  canRenameCertification,
+  createCertification,
+  fetchCertifications,
+  getErrorMessage,
+  renameCertification,
+  setCertificationArchived,
+} from '../lib/certificationsApi';
 import { colors } from '../theme/colors';
 import type { Certification } from '../types/certification';
 
 type ListTab = 'active' | 'archive';
-
 type NameModalMode = 'add' | 'rename';
 
 type Props = {
-  certifications: Certification[];
-  onCertificationsChange: (next: Certification[]) => void;
   onSelect?: (certification: Certification) => void;
 };
-
-function createId() {
-  return `cert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 function normalizeName(name: string) {
   return name.trim();
 }
 
-export function CertSelectScreen({
-  certifications,
-  onCertificationsChange,
-  onSelect,
-}: Props) {
+export function CertSelectScreen({ onSelect }: Props) {
+  const [certifications, setCertifications] = useState<Certification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [listTab, setListTab] = useState<ListTab>('active');
   const [nameModalMode, setNameModalMode] = useState<NameModalMode | null>(null);
@@ -45,8 +46,28 @@ export function CertSelectScreen({
   const [archiveTarget, setArchiveTarget] = useState<Certification | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<Certification | null>(null);
   const [restoreFromNameModal, setRestoreFromNameModal] = useState(false);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
+
+  const loadCertifications = useCallback(async () => {
+    setLoading(true);
+    try {
+      const rows = await fetchCertifications();
+      setCertifications(rows);
+    } catch (error) {
+      console.error('[CertSelectScreen] load', error);
+      setNoticeMessage(
+        getErrorMessage(error, '資格一覧の取得に失敗しました。時間をおいて再度お試しください。'),
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCertifications();
+  }, [loadCertifications]);
 
   const activeCerts = useMemo(
     () => certifications.filter((item) => !item.isArchive),
@@ -85,11 +106,28 @@ export function CertSelectScreen({
     setNameModalMode('add');
   };
 
-  const openRenameModal = (cert: Certification) => {
+  const openRenameModal = async (cert: Certification) => {
     setSelectedId(cert.id);
     setDraftName(cert.name);
     setNameError(null);
-    setNameModalMode('rename');
+    setBusy(true);
+    try {
+      const allowed = await canRenameCertification(cert.id);
+      if (!allowed) {
+        setNoticeMessage(
+          '例題または履歴がある資格は改名できません。中身を空にすると改名できます。',
+        );
+        return;
+      }
+      setNameModalMode('rename');
+    } catch (error) {
+      console.error('[CertSelectScreen] canRename', error);
+      setNoticeMessage(
+        getErrorMessage(error, '改名できるかの確認に失敗しました。'),
+      );
+    } finally {
+      setBusy(false);
+    }
   };
 
   const closeNameModal = () => {
@@ -98,21 +136,26 @@ export function CertSelectScreen({
     setNameError(null);
   };
 
-  const applyRestore = (cert: Certification) => {
-    onCertificationsChange(
-      certifications.map((item) =>
-        item.id === cert.id ? { ...item, isArchive: false } : item,
-      ),
-    );
-    setListTab('active');
-    setSelectedId(cert.id);
-    setRestoreTarget(null);
-    setRestoreFromNameModal(false);
-    closeNameModal();
+  const applyRestore = async (cert: Certification) => {
+    setBusy(true);
+    try {
+      await setCertificationArchived(cert.userCertificationId, false);
+      await loadCertifications();
+      setListTab('active');
+      setSelectedId(cert.id);
+      setRestoreTarget(null);
+      setRestoreFromNameModal(false);
+      closeNameModal();
+    } catch (error) {
+      console.error('[CertSelectScreen] restore', error);
+      setNoticeMessage(getErrorMessage(error, '復元に失敗しました。'));
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const handleNameSubmit = () => {
-    if (!trimmedName || !nameModalMode) return;
+  const handleNameSubmit = async () => {
+    if (!trimmedName || !nameModalMode || busy) return;
 
     if (nameModalMode === 'add') {
       const existing = findByName(trimmedName);
@@ -126,15 +169,24 @@ export function CertSelectScreen({
         return;
       }
 
-      const next: Certification = {
-        id: createId(),
-        name: trimmedName,
-        isArchive: false,
-      };
-      onCertificationsChange([...certifications, next]);
-      setListTab('active');
-      setSelectedId(next.id);
-      closeNameModal();
+      setBusy(true);
+      try {
+        const created = await createCertification(trimmedName);
+        await loadCertifications();
+        setListTab('active');
+        setSelectedId(created.id);
+        closeNameModal();
+      } catch (error) {
+        console.error('[CertSelectScreen] create', error);
+        const message = getErrorMessage(error, '資格の追加に失敗しました。');
+        if (message.includes('同じ名前')) {
+          setNameError(message);
+        } else {
+          setNoticeMessage(message);
+        }
+      } finally {
+        setBusy(false);
+      }
       return;
     }
 
@@ -156,25 +208,40 @@ export function CertSelectScreen({
       return;
     }
 
-    onCertificationsChange(
-      certifications.map((item) =>
-        item.id === selected.id ? { ...item, name: trimmedName } : item,
-      ),
-    );
-    closeNameModal();
+    setBusy(true);
+    try {
+      await renameCertification(selected.id, trimmedName);
+      await loadCertifications();
+      closeNameModal();
+    } catch (error) {
+      console.error('[CertSelectScreen] rename', error);
+      const message = getErrorMessage(error, '改名に失敗しました。');
+      if (message.includes('同じ名前') || message.includes('改名できません')) {
+        setNameError(message);
+      } else {
+        setNoticeMessage(message);
+      }
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const handleArchiveConfirm = () => {
-    if (!archiveTarget) return;
-    onCertificationsChange(
-      certifications.map((item) =>
-        item.id === archiveTarget.id ? { ...item, isArchive: true } : item,
-      ),
-    );
-    if (selectedId === archiveTarget.id) {
-      setSelectedId(null);
+  const handleArchiveConfirm = async () => {
+    if (!archiveTarget || busy) return;
+    setBusy(true);
+    try {
+      await setCertificationArchived(archiveTarget.userCertificationId, true);
+      await loadCertifications();
+      if (selectedId === archiveTarget.id) {
+        setSelectedId(null);
+      }
+      setArchiveTarget(null);
+    } catch (error) {
+      console.error('[CertSelectScreen] archive', error);
+      setNoticeMessage(getErrorMessage(error, 'アーカイブに失敗しました。'));
+    } finally {
+      setBusy(false);
     }
-    setArchiveTarget(null);
   };
 
   const handleStart = () => {
@@ -188,6 +255,7 @@ export function CertSelectScreen({
       ? '新しい資格名を入力してください'
       : '学びたい資格名を入力してください';
   const nameModalSubmitLabel = nameModalMode === 'rename' ? '変更する' : '追加する';
+  const submitDisabled = !trimmedName || busy;
 
   return (
     <View style={styles.root}>
@@ -200,12 +268,13 @@ export function CertSelectScreen({
         <Text style={styles.brand}>CertResolve</Text>
         <Text style={styles.headline}>どの資格を学びますか？</Text>
         <Text style={styles.lead}>
-          学びたい資格を追加し、改名やアーカイブしながら一覧から選べます。
+          学びたい資格を追加し、改名やアーカイブしながら一覧から選べます。データはクラウドに保存されます。
         </Text>
 
         <View style={styles.toolbar}>
           <Pressable
             accessibilityRole="button"
+            disabled={busy}
             onPress={openAddModal}
             style={({ pressed }) => [styles.addButton, pressed && styles.addButtonPressed]}
           >
@@ -241,7 +310,12 @@ export function CertSelectScreen({
           </View>
         </View>
 
-        {visibleCerts.length === 0 ? (
+        {loading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator color={colors.accent} />
+            <Text style={styles.loadingLabel}>資格一覧を読み込み中…</Text>
+          </View>
+        ) : visibleCerts.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>
               {listTab === 'active'
@@ -277,7 +351,10 @@ export function CertSelectScreen({
                       <>
                         <Pressable
                           accessibilityRole="button"
-                          onPress={() => openRenameModal(cert)}
+                          disabled={busy}
+                          onPress={() => {
+                            void openRenameModal(cert);
+                          }}
                           style={({ pressed }) => [
                             styles.rowAction,
                             pressed && styles.rowActionPressed,
@@ -287,6 +364,7 @@ export function CertSelectScreen({
                         </Pressable>
                         <Pressable
                           accessibilityRole="button"
+                          disabled={busy}
                           onPress={() => {
                             setSelectedId(cert.id);
                             setArchiveTarget(cert);
@@ -303,6 +381,7 @@ export function CertSelectScreen({
                     ) : (
                       <Pressable
                         accessibilityRole="button"
+                        disabled={busy}
                         onPress={() => {
                           setSelectedId(cert.id);
                           setRestoreTarget(cert);
@@ -370,7 +449,9 @@ export function CertSelectScreen({
               placeholderTextColor={colors.muted}
               style={styles.input}
               returnKeyType="done"
-              onSubmitEditing={handleNameSubmit}
+              onSubmitEditing={() => {
+                void handleNameSubmit();
+              }}
             />
             {nameError ? <Text style={styles.errorText}>{nameError}</Text> : null}
             <View style={styles.modalActions}>
@@ -386,22 +467,28 @@ export function CertSelectScreen({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                disabled={!trimmedName}
-                onPress={handleNameSubmit}
+                disabled={submitDisabled}
+                onPress={() => {
+                  void handleNameSubmit();
+                }}
                 style={({ pressed }) => [
                   styles.primaryButton,
-                  !trimmedName && styles.primaryButtonDisabled,
-                  pressed && trimmedName && styles.primaryButtonPressed,
+                  submitDisabled && styles.primaryButtonDisabled,
+                  pressed && !submitDisabled && styles.primaryButtonPressed,
                 ]}
               >
-                <Text
-                  style={[
-                    styles.primaryButtonLabel,
-                    !trimmedName && styles.primaryButtonLabelDisabled,
-                  ]}
-                >
-                  {nameModalSubmitLabel}
-                </Text>
+                {busy ? (
+                  <ActivityIndicator color={colors.paper} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.primaryButtonLabel,
+                      submitDisabled && styles.primaryButtonLabelDisabled,
+                    ]}
+                  >
+                    {nameModalSubmitLabel}
+                  </Text>
+                )}
               </Pressable>
             </View>
           </View>
@@ -437,13 +524,20 @@ export function CertSelectScreen({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                onPress={handleArchiveConfirm}
+                disabled={busy}
+                onPress={() => {
+                  void handleArchiveConfirm();
+                }}
                 style={({ pressed }) => [
                   styles.primaryButton,
                   pressed && styles.primaryButtonPressed,
                 ]}
               >
-                <Text style={styles.primaryButtonLabel}>アーカイブする</Text>
+                {busy ? (
+                  <ActivityIndicator color={colors.paper} />
+                ) : (
+                  <Text style={styles.primaryButtonLabel}>アーカイブする</Text>
+                )}
               </Pressable>
             </View>
           </View>
@@ -492,15 +586,50 @@ export function CertSelectScreen({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
+                disabled={busy}
                 onPress={() => {
-                  if (restoreTarget) applyRestore(restoreTarget);
+                  if (restoreTarget) void applyRestore(restoreTarget);
                 }}
                 style={({ pressed }) => [
                   styles.primaryButton,
                   pressed && styles.primaryButtonPressed,
                 ]}
               >
-                <Text style={styles.primaryButtonLabel}>復元する</Text>
+                {busy ? (
+                  <ActivityIndicator color={colors.paper} />
+                ) : (
+                  <Text style={styles.primaryButtonLabel}>復元する</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={noticeMessage != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNoticeMessage(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setNoticeMessage(null)}
+          />
+          <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
+            <Text style={styles.modalTitle}>お知らせ</Text>
+            <Text style={styles.modalLead}>{noticeMessage}</Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setNoticeMessage(null)}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.primaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.primaryButtonLabel}>閉じる</Text>
               </Pressable>
             </View>
           </View>
@@ -604,6 +733,20 @@ const styles = StyleSheet.create({
   },
   tabLabelSelected: {
     color: colors.accentDeep,
+  },
+  loadingBox: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 16,
+    paddingVertical: 28,
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.paper,
+  },
+  loadingLabel: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 14,
+    color: colors.inkSoft,
   },
   empty: {
     borderWidth: 1,
@@ -804,6 +947,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    minWidth: 96,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: colors.accent,
   },
   primaryButtonDisabled: {

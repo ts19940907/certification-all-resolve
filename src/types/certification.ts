@@ -1,6 +1,8 @@
 export type Certification = {
+  /** certifications.id */
   id: string;
   name: string;
-  /** UI用。本番では中間テーブルの is_archive に相当 */
   isArchive: boolean;
+  /** user_certifications.id（アーカイブ更新用） */
+  userCertificationId: string;
 };

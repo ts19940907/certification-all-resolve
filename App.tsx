@@ -7,7 +7,6 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import type { Session } from '@supabase/supabase-js';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { INITIAL_CERTIFICATIONS } from './src/data/certifications';
 import { supabase } from './src/lib/supabase';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { CertMainScreen } from './src/screens/CertMainScreen';
@@ -25,8 +24,6 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [screen, setScreen] = useState<Screen>('select');
-  const [certifications, setCertifications] =
-    useState<Certification[]>(INITIAL_CERTIFICATIONS);
   const [activeCertification, setActiveCertification] =
     useState<Certification | null>(null);
 
@@ -111,11 +108,7 @@ export default function App() {
               <Text style={styles.signOutLabel}>ログアウト</Text>
             </Pressable>
           </View>
-          <CertSelectScreen
-            certifications={certifications}
-            onCertificationsChange={setCertifications}
-            onSelect={handleSelect}
-          />
+          <CertSelectScreen onSelect={handleSelect} />
         </View>
       ) : (
         <CertMainScreen certification={activeCertification} onBack={handleBack} />
