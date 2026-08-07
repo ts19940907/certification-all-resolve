@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -14,6 +14,10 @@ import {
 import { colors } from '../theme/colors';
 import type { Certification } from '../types/certification';
 
+type ListTab = 'active' | 'archive';
+
+type NameModalMode = 'add' | 'rename';
+
 type Props = {
   certifications: Certification[];
   onCertificationsChange: (next: Certification[]) => void;
@@ -24,46 +28,166 @@ function createId() {
   return `cert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeName(name: string) {
+  return name.trim();
+}
+
 export function CertSelectScreen({
   certifications,
   onCertificationsChange,
   onSelect,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [listTab, setListTab] = useState<ListTab>('active');
+  const [nameModalMode, setNameModalMode] = useState<NameModalMode | null>(null);
   const [draftName, setDraftName] = useState('');
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<Certification | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<Certification | null>(null);
+  const [restoreFromNameModal, setRestoreFromNameModal] = useState(false);
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
+
+  const activeCerts = useMemo(
+    () => certifications.filter((item) => !item.isArchive),
+    [certifications],
+  );
+  const archivedCerts = useMemo(
+    () => certifications.filter((item) => item.isArchive),
+    [certifications],
+  );
+  const visibleCerts = listTab === 'active' ? activeCerts : archivedCerts;
   const selected = certifications.find((item) => item.id === selectedId) ?? null;
-  const trimmedName = draftName.trim();
+  const selectedVisible =
+    selected &&
+    ((listTab === 'active' && !selected.isArchive) ||
+      (listTab === 'archive' && selected.isArchive))
+      ? selected
+      : null;
+  const trimmedName = normalizeName(draftName);
+  const canStart = Boolean(selectedVisible && !selectedVisible.isArchive);
+
+  const findByName = (name: string, exceptId?: string) =>
+    certifications.find(
+      (item) =>
+        normalizeName(item.name) === name &&
+        (exceptId == null || item.id !== exceptId),
+    );
+
+  const switchTab = (tab: ListTab) => {
+    setListTab(tab);
+    setSelectedId(null);
+  };
 
   const openAddModal = () => {
     setDraftName('');
-    setIsAddOpen(true);
+    setNameError(null);
+    setNameModalMode('add');
   };
 
-  const closeAddModal = () => {
-    setIsAddOpen(false);
+  const openRenameModal = (cert: Certification) => {
+    setSelectedId(cert.id);
+    setDraftName(cert.name);
+    setNameError(null);
+    setNameModalMode('rename');
+  };
+
+  const closeNameModal = () => {
+    setNameModalMode(null);
     setDraftName('');
+    setNameError(null);
   };
 
-  const handleAdd = () => {
-    if (!trimmedName) return;
+  const applyRestore = (cert: Certification) => {
+    onCertificationsChange(
+      certifications.map((item) =>
+        item.id === cert.id ? { ...item, isArchive: false } : item,
+      ),
+    );
+    setListTab('active');
+    setSelectedId(cert.id);
+    setRestoreTarget(null);
+    setRestoreFromNameModal(false);
+    closeNameModal();
+  };
 
-    const next: Certification = {
-      id: createId(),
-      name: trimmedName,
-    };
+  const handleNameSubmit = () => {
+    if (!trimmedName || !nameModalMode) return;
 
-    onCertificationsChange([...certifications, next]);
-    setSelectedId(next.id);
-    closeAddModal();
+    if (nameModalMode === 'add') {
+      const existing = findByName(trimmedName);
+      if (existing && !existing.isArchive) {
+        setNameError('同じ名前の資格がすでにあります');
+        return;
+      }
+      if (existing && existing.isArchive) {
+        setRestoreTarget(existing);
+        setRestoreFromNameModal(true);
+        return;
+      }
+
+      const next: Certification = {
+        id: createId(),
+        name: trimmedName,
+        isArchive: false,
+      };
+      onCertificationsChange([...certifications, next]);
+      setListTab('active');
+      setSelectedId(next.id);
+      closeNameModal();
+      return;
+    }
+
+    if (!selected || selected.isArchive) return;
+
+    if (normalizeName(selected.name) === trimmedName) {
+      closeNameModal();
+      return;
+    }
+
+    const existing = findByName(trimmedName, selected.id);
+    if (existing && !existing.isArchive) {
+      setNameError('同じ名前の資格がすでにあります');
+      return;
+    }
+    if (existing && existing.isArchive) {
+      setRestoreTarget(existing);
+      setRestoreFromNameModal(true);
+      return;
+    }
+
+    onCertificationsChange(
+      certifications.map((item) =>
+        item.id === selected.id ? { ...item, name: trimmedName } : item,
+      ),
+    );
+    closeNameModal();
+  };
+
+  const handleArchiveConfirm = () => {
+    if (!archiveTarget) return;
+    onCertificationsChange(
+      certifications.map((item) =>
+        item.id === archiveTarget.id ? { ...item, isArchive: true } : item,
+      ),
+    );
+    if (selectedId === archiveTarget.id) {
+      setSelectedId(null);
+    }
+    setArchiveTarget(null);
   };
 
   const handleStart = () => {
-    if (!selected) return;
-    onSelect?.(selected);
+    if (!selectedVisible || selectedVisible.isArchive) return;
+    onSelect?.(selectedVisible);
   };
+
+  const nameModalTitle = nameModalMode === 'rename' ? '資格名を変更' : '資格を追加';
+  const nameModalLead =
+    nameModalMode === 'rename'
+      ? '新しい資格名を入力してください'
+      : '学びたい資格名を入力してください';
+  const nameModalSubmitLabel = nameModalMode === 'rename' ? '変更する' : '追加する';
 
   return (
     <View style={styles.root}>
@@ -76,27 +200,63 @@ export function CertSelectScreen({
         <Text style={styles.brand}>CertResolve</Text>
         <Text style={styles.headline}>どの資格を学びますか？</Text>
         <Text style={styles.lead}>
-          学びたい資格を追加して、一覧から選んで始められます。
+          学びたい資格を追加し、改名やアーカイブしながら一覧から選べます。
         </Text>
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={openAddModal}
-          style={({ pressed }) => [styles.addButton, pressed && styles.addButtonPressed]}
-        >
-          <Text style={styles.addButtonLabel}>＋ 資格を追加</Text>
-        </Pressable>
+        <View style={styles.toolbar}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={openAddModal}
+            style={({ pressed }) => [styles.addButton, pressed && styles.addButtonPressed]}
+          >
+            <Text style={styles.addButtonLabel}>＋ 資格を追加</Text>
+          </Pressable>
 
-        {certifications.length === 0 ? (
+          <View style={styles.tabs}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: listTab === 'active' }}
+              onPress={() => switchTab('active')}
+              style={[styles.tab, listTab === 'active' && styles.tabSelected]}
+            >
+              <Text
+                style={[styles.tabLabel, listTab === 'active' && styles.tabLabelSelected]}
+              >
+                学習中
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: listTab === 'archive' }}
+              onPress={() => switchTab('archive')}
+              style={[styles.tab, listTab === 'archive' && styles.tabSelected]}
+            >
+              <Text
+                style={[styles.tabLabel, listTab === 'archive' && styles.tabLabelSelected]}
+              >
+                アーカイブ
+                {archivedCerts.length > 0 ? ` (${archivedCerts.length})` : ''}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {visibleCerts.length === 0 ? (
           <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>まだ資格がありません</Text>
+            <Text style={styles.emptyTitle}>
+              {listTab === 'active'
+                ? 'まだ資格がありません'
+                : 'アーカイブは空です'}
+            </Text>
             <Text style={styles.emptyBody}>
-              「資格を追加」から、学びたい資格名を自由に入力してください。
+              {listTab === 'active'
+                ? '「資格を追加」から、学びたい資格名を自由に入力してください。'
+                : '学習中の資格をアーカイブすると、ここに表示されます。'}
             </Text>
           </View>
         ) : (
           <View style={[styles.list, isWide && styles.listWide]}>
-            {certifications.map((cert) => {
+            {visibleCerts.map((cert) => {
               const isSelected = cert.id === selectedId;
               return (
                 <Pressable
@@ -112,6 +272,51 @@ export function CertSelectScreen({
                   ]}
                 >
                   <Text style={styles.name}>{cert.name}</Text>
+                  <View style={styles.itemActions}>
+                    {listTab === 'active' ? (
+                      <>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => openRenameModal(cert)}
+                          style={({ pressed }) => [
+                            styles.rowAction,
+                            pressed && styles.rowActionPressed,
+                          ]}
+                        >
+                          <Text style={styles.rowActionLabel}>改名</Text>
+                        </Pressable>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => {
+                            setSelectedId(cert.id);
+                            setArchiveTarget(cert);
+                          }}
+                          style={({ pressed }) => [
+                            styles.rowAction,
+                            styles.rowActionMuted,
+                            pressed && styles.rowActionPressed,
+                          ]}
+                        >
+                          <Text style={styles.rowActionLabelMuted}>アーカイブ</Text>
+                        </Pressable>
+                      </>
+                    ) : (
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => {
+                          setSelectedId(cert.id);
+                          setRestoreTarget(cert);
+                          setRestoreFromNameModal(false);
+                        }}
+                        style={({ pressed }) => [
+                          styles.rowAction,
+                          pressed && styles.rowActionPressed,
+                        ]}
+                      >
+                        <Text style={styles.rowActionLabel}>復元</Text>
+                      </Pressable>
+                    )}
+                  </View>
                 </Pressable>
               );
             })}
@@ -122,48 +327,56 @@ export function CertSelectScreen({
       <View style={[styles.footer, isWide && styles.footerWide]}>
         <Pressable
           accessibilityRole="button"
-          disabled={!selected}
+          disabled={!canStart}
           onPress={handleStart}
           style={({ pressed }) => [
             styles.cta,
-            !selected && styles.ctaDisabled,
-            pressed && selected && styles.ctaPressed,
+            !canStart && styles.ctaDisabled,
+            pressed && canStart && styles.ctaPressed,
           ]}
         >
-          <Text style={[styles.ctaLabel, !selected && styles.ctaLabelDisabled]}>
-            {selected ? `${selected.name} で始める` : '資格を選択してください'}
+          <Text style={[styles.ctaLabel, !canStart && styles.ctaLabelDisabled]}>
+            {listTab === 'archive'
+              ? 'アーカイブ中は開始できません'
+              : selectedVisible
+                ? `${selectedVisible.name} で始める`
+                : '資格を選択してください'}
           </Text>
         </Pressable>
       </View>
 
       <Modal
-        visible={isAddOpen}
+        visible={nameModalMode != null}
         transparent
         animationType="fade"
-        onRequestClose={closeAddModal}
+        onRequestClose={closeNameModal}
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalOverlay}
         >
-          <Pressable style={styles.modalBackdrop} onPress={closeAddModal} />
+          <Pressable style={styles.modalBackdrop} onPress={closeNameModal} />
           <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
-            <Text style={styles.modalTitle}>資格を追加</Text>
-            <Text style={styles.modalLead}>学びたい資格名を入力してください</Text>
+            <Text style={styles.modalTitle}>{nameModalTitle}</Text>
+            <Text style={styles.modalLead}>{nameModalLead}</Text>
             <TextInput
               autoFocus
               value={draftName}
-              onChangeText={setDraftName}
+              onChangeText={(text) => {
+                setDraftName(text);
+                setNameError(null);
+              }}
               placeholder="例: 基本情報技術者試験"
               placeholderTextColor={colors.muted}
               style={styles.input}
               returnKeyType="done"
-              onSubmitEditing={handleAdd}
+              onSubmitEditing={handleNameSubmit}
             />
+            {nameError ? <Text style={styles.errorText}>{nameError}</Text> : null}
             <View style={styles.modalActions}>
               <Pressable
                 accessibilityRole="button"
-                onPress={closeAddModal}
+                onPress={closeNameModal}
                 style={({ pressed }) => [
                   styles.secondaryButton,
                   pressed && styles.secondaryButtonPressed,
@@ -174,7 +387,7 @@ export function CertSelectScreen({
               <Pressable
                 accessibilityRole="button"
                 disabled={!trimmedName}
-                onPress={handleAdd}
+                onPress={handleNameSubmit}
                 style={({ pressed }) => [
                   styles.primaryButton,
                   !trimmedName && styles.primaryButtonDisabled,
@@ -187,12 +400,111 @@ export function CertSelectScreen({
                     !trimmedName && styles.primaryButtonLabelDisabled,
                   ]}
                 >
-                  追加する
+                  {nameModalSubmitLabel}
                 </Text>
               </Pressable>
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        visible={archiveTarget != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setArchiveTarget(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setArchiveTarget(null)}
+          />
+          <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
+            <Text style={styles.modalTitle}>アーカイブしますか？</Text>
+            <Text style={styles.modalLead}>
+              「{archiveTarget?.name}」を学習中一覧から外し、アーカイブへ移します。あとから復元できます。
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setArchiveTarget(null)}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed && styles.secondaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.secondaryButtonLabel}>キャンセル</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={handleArchiveConfirm}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.primaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.primaryButtonLabel}>アーカイブする</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={restoreTarget != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setRestoreTarget(null);
+          setRestoreFromNameModal(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => {
+              setRestoreTarget(null);
+              setRestoreFromNameModal(false);
+            }}
+          />
+          <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
+            <Text style={styles.modalTitle}>
+              {restoreFromNameModal ? 'アーカイブから復元しますか？' : '復元しますか？'}
+            </Text>
+            <Text style={styles.modalLead}>
+              {restoreFromNameModal
+                ? `「${restoreTarget?.name}」はアーカイブにあります。新しく追加せず、復元しますか？`
+                : `「${restoreTarget?.name}」を学習中一覧に戻します。`}
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setRestoreTarget(null);
+                  setRestoreFromNameModal(false);
+                }}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed && styles.secondaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.secondaryButtonLabel}>キャンセル</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  if (restoreTarget) applyRestore(restoreTarget);
+                }}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.primaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.primaryButtonLabel}>復元する</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -245,6 +557,10 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     maxWidth: 520,
   },
+  toolbar: {
+    gap: 14,
+    marginBottom: 20,
+  },
   addButton: {
     alignSelf: 'flex-start',
     borderWidth: 1.5,
@@ -253,7 +569,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginBottom: 20,
     backgroundColor: colors.paper,
   },
   addButtonPressed: {
@@ -262,6 +577,32 @@ const styles = StyleSheet.create({
   addButtonLabel: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 15,
+    color: colors.accentDeep,
+  },
+  tabs: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.paper,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: 4,
+    gap: 4,
+  },
+  tab: {
+    borderRadius: 9,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  tabSelected: {
+    backgroundColor: colors.accentSoft,
+  },
+  tabLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.muted,
+  },
+  tabLabelSelected: {
     color: colors.accentDeep,
   },
   empty: {
@@ -300,6 +641,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 16,
     width: '100%',
+    gap: 12,
   },
   itemWide: {
     width: '48.5%',
@@ -317,6 +659,33 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 26,
     color: colors.ink,
+  },
+  itemActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  rowAction: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.accentSoft,
+  },
+  rowActionMuted: {
+    backgroundColor: colors.mist,
+  },
+  rowActionPressed: {
+    opacity: 0.85,
+  },
+  rowActionLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.accentDeep,
+  },
+  rowActionLabelMuted: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.inkSoft,
   },
   footer: {
     position: 'absolute',
@@ -401,13 +770,21 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansJP_400Regular',
     fontSize: 16,
     color: colors.ink,
-    marginBottom: 18,
+    marginBottom: 10,
     backgroundColor: colors.mist,
+  },
+  errorText: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.spotlightDeep,
+    marginBottom: 12,
   },
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 10,
+    marginTop: 8,
   },
   secondaryButton: {
     borderRadius: 12,
