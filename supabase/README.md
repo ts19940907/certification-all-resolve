@@ -87,3 +87,8 @@ supabase functions deploy validate-certification
 3. アプリの「資格を追加／改名」→「照合する」→ 確認ダイアログ → 保存  
    - 1件に絞れない／特定不能／対応形式なしは登録・改名を拒否
    - 改名時も正式名称と出題形式レンジを更新（例題・履歴がある資格は従来どおり改名不可）
+
+## 例題の削除
+
+SQL Editor で `migrations/20260807160000_fix_example_delete.sql` を Run。  
+（削除時の trigger 不整合修正 + `delete_example` RPC）

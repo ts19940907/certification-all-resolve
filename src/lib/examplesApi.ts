@@ -105,6 +105,18 @@ export async function fetchExampleDetail(
   };
 }
 
+/** examples を物理削除（RPC）。select_answer も一緒に削除 */
+export async function deleteExample(exampleId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_example', {
+    p_example_id: exampleId,
+  });
+
+  if (error) {
+    console.error('[examples] delete', error);
+    throw error;
+  }
+}
+
 /** Fisher–Yates */
 export function shuffleChoices<T>(items: T[]): T[] {
   const next = [...items];

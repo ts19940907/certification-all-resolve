@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,7 +12,7 @@ import {
 } from 'react-native';
 import { ExampleCreateModal } from '../components/ExampleCreateModal';
 import { ExampleSolveModal } from '../components/ExampleSolveModal';
-import { fetchExamples } from '../lib/examplesApi';
+import { deleteExample, fetchExamples } from '../lib/examplesApi';
 import { getErrorMessage } from '../lib/certificationsApi';
 import { colors } from '../theme/colors';
 import type { Certification } from '../types/certification';
@@ -60,6 +62,9 @@ export function CertMainScreen({ certification, onBack }: Props) {
   );
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [solveExampleId, setSolveExampleId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ExampleSummary | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [examples, setExamples] = useState<ExampleSummary[]>([]);
   const [examplesError, setExamplesError] = useState<string | null>(null);
   const [examplesLoading, setExamplesLoading] = useState(true);
@@ -80,6 +85,27 @@ export function CertMainScreen({ certification, onBack }: Props) {
   useEffect(() => {
     void loadExamples();
   }, [loadExamples]);
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      await deleteExample(deleteTarget.id);
+      if (solveExampleId === deleteTarget.id) {
+        setSolveExampleId(null);
+      }
+      setDeleteTarget(null);
+      await loadExamples();
+    } catch (error) {
+      console.error('[CertMainScreen] delete', error);
+      setDeleteTarget(null);
+      setNoticeMessage(
+        getErrorMessage(error, '例題の削除に失敗しました。時間をおいて再度お試しください。'),
+      );
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
 
   const handleQuestionCountChange = (text: string) => {
     const digits = text.replace(/\D/g, '').slice(0, 2);
@@ -297,6 +323,8 @@ export function CertMainScreen({ certification, onBack }: Props) {
                       </Pressable>
                       <Pressable
                         accessibilityRole="button"
+                        disabled={deleteBusy}
+                        onPress={() => setDeleteTarget(example)}
                         style={({ pressed }) => [
                           styles.rowAction,
                           styles.rowActionDanger,
@@ -365,6 +393,90 @@ export function CertMainScreen({ certification, onBack }: Props) {
         exampleId={solveExampleId}
         onClose={() => setSolveExampleId(null)}
       />
+
+      <Modal
+        visible={deleteTarget != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!deleteBusy) setDeleteTarget(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => {
+              if (!deleteBusy) setDeleteTarget(null);
+            }}
+          />
+          <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
+            <Text style={styles.modalTitle}>例題を削除しますか？</Text>
+            <Text style={styles.modalLead}>
+              「{deleteTarget?.title}」を削除します。この操作は取り消せません。
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={deleteBusy}
+                onPress={() => setDeleteTarget(null)}
+                style={({ pressed }) => [
+                  styles.modalSecondaryButton,
+                  pressed && styles.modalSecondaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.modalSecondaryButtonLabel}>キャンセル</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={deleteBusy}
+                onPress={() => {
+                  void handleDeleteConfirm();
+                }}
+                style={({ pressed }) => [
+                  styles.modalDangerButton,
+                  pressed && styles.modalDangerButtonPressed,
+                ]}
+              >
+                {deleteBusy ? (
+                  <ActivityIndicator color={colors.paper} />
+                ) : (
+                  <Text style={styles.modalDangerButtonLabel}>OK</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={noticeMessage != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNoticeMessage(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setNoticeMessage(null)}
+          />
+          <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
+            <Text style={styles.modalTitle}>お知らせ</Text>
+            <Text style={styles.modalLead}>{noticeMessage}</Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setNoticeMessage(null)}
+                style={({ pressed }) => [
+                  styles.modalPrimaryButton,
+                  pressed && styles.modalPrimaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.modalPrimaryButtonLabel}>閉じる</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -799,6 +911,99 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentDeep,
   },
   reviewButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.paper,
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(16, 42, 67, 0.45)',
+  },
+  modalCard: {
+    backgroundColor: colors.paper,
+    borderRadius: 16,
+    padding: 20,
+    zIndex: 2,
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 420,
+    gap: 12,
+  },
+  modalCardWide: {
+    maxWidth: 480,
+  },
+  modalTitle: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 18,
+    color: colors.ink,
+  },
+  modalLead: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 14,
+    lineHeight: 22,
+    color: colors.inkSoft,
+    marginBottom: 4,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 4,
+  },
+  modalSecondaryButton: {
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.mist,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  modalSecondaryButtonPressed: {
+    backgroundColor: colors.accentSoft,
+  },
+  modalSecondaryButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.inkSoft,
+  },
+  modalPrimaryButton: {
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.accent,
+    minHeight: 44,
+    minWidth: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalPrimaryButtonPressed: {
+    backgroundColor: colors.accentDeep,
+  },
+  modalPrimaryButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.paper,
+  },
+  modalDangerButton: {
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#9B3B3B',
+    minHeight: 44,
+    minWidth: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalDangerButtonPressed: {
+    backgroundColor: '#7A2E2E',
+  },
+  modalDangerButtonLabel: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 14,
     color: colors.paper,
