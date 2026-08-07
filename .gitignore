@@ -47,4 +47,7 @@ yarn-error.*
 
 # local docs
 docs/
-supabase/
+
+# Supabase local clutter（migrations / functions / README は追跡する）
+supabase/.branches
+supabase/.temp

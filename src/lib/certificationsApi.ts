@@ -1,13 +1,19 @@
 import { supabase } from './supabase';
 import type { Certification } from '../types/certification';
 
+type CertFields = {
+  id: string;
+  name: string;
+  question_format: number | null;
+  choice_min: number | null;
+  choice_max: number | null;
+  answer_max: number | null;
+};
+
 type UserCertRow = {
   id: string;
   is_archive: boolean;
-  certification:
-    | { id: string; name: string }
-    | { id: string; name: string }[]
-    | null;
+  certification: CertFields | CertFields[] | null;
 };
 
 function mapRow(row: UserCertRow): Certification | null {
@@ -20,6 +26,10 @@ function mapRow(row: UserCertRow): Certification | null {
     name: cert.name,
     isArchive: row.is_archive,
     userCertificationId: row.id,
+    questionFormat: cert.question_format ?? 0,
+    choiceMin: cert.choice_min,
+    choiceMax: cert.choice_max,
+    answerMax: cert.answer_max,
   };
 }
 
@@ -54,7 +64,11 @@ export async function fetchCertifications(): Promise<Certification[]> {
       is_archive,
       certification:certifications (
         id,
-        name
+        name,
+        question_format,
+        choice_min,
+        choice_max,
+        answer_max
       )
     `,
     )
@@ -95,6 +109,10 @@ export async function createCertification(name: string): Promise<Certification> 
     name: row.name,
     isArchive: row.isArchive,
     userCertificationId: row.userCertificationId,
+    questionFormat: 0,
+    choiceMin: null,
+    choiceMax: null,
+    answerMax: null,
   };
 }
 

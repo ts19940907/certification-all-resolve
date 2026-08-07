@@ -5,4 +5,9 @@ export type Certification = {
   isArchive: boolean;
   /** user_certifications.id（アーカイブ更新用） */
   userCertificationId: string;
+  /** ビットフラグ 1=単一 2=複数 4=記述 */
+  questionFormat: number;
+  choiceMin: number | null;
+  choiceMax: number | null;
+  answerMax: number | null;
 };

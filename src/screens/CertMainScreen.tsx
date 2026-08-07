@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -8,8 +8,12 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { ExampleCreateModal } from '../components/ExampleCreateModal';
+import { fetchExamples } from '../lib/examplesApi';
+import { getErrorMessage } from '../lib/certificationsApi';
 import { colors } from '../theme/colors';
 import type { Certification } from '../types/certification';
+import type { ExampleSummary } from '../types/example';
 
 type Props = {
   certification: Certification;
@@ -19,11 +23,6 @@ type Props = {
 const MIN_QUESTION_COUNT = 10;
 const MAX_QUESTION_COUNT = 25;
 const DEFAULT_QUESTION_COUNT = 10;
-
-/** レイアウト確認用の仮データ。操作の本実装は後続ブランチで追加する */
-const PLACEHOLDER_EXAMPLES = [
-  { id: 'ex-1', title: '例題のタイトル（仮）' },
-];
 
 /** 新しい順。本実装では実施日時でソートする */
 const PLACEHOLDER_HISTORY = [
@@ -58,6 +57,27 @@ export function CertMainScreen({ certification, onBack }: Props) {
   const [questionCountText, setQuestionCountText] = useState(
     String(DEFAULT_QUESTION_COUNT),
   );
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [examples, setExamples] = useState<ExampleSummary[]>([]);
+  const [examplesError, setExamplesError] = useState<string | null>(null);
+  const [examplesLoading, setExamplesLoading] = useState(true);
+
+  const loadExamples = useCallback(async () => {
+    setExamplesLoading(true);
+    setExamplesError(null);
+    try {
+      const rows = await fetchExamples(certification.id);
+      setExamples(rows);
+    } catch (error) {
+      setExamplesError(getErrorMessage(error, '例題一覧の取得に失敗しました'));
+    } finally {
+      setExamplesLoading(false);
+    }
+  }, [certification.id]);
+
+  useEffect(() => {
+    void loadExamples();
+  }, [loadExamples]);
 
   const handleQuestionCountChange = (text: string) => {
     const digits = text.replace(/\D/g, '').slice(0, 2);
@@ -199,6 +219,7 @@ export function CertMainScreen({ certification, onBack }: Props) {
               <Text style={styles.examplesTitle}>例題一覧</Text>
               <Pressable
                 accessibilityRole="button"
+                onPress={() => setIsCreateOpen(true)}
                 style={({ pressed }) => [
                   styles.createButton,
                   pressed && styles.createButtonPressed,
@@ -237,44 +258,54 @@ export function CertMainScreen({ certification, onBack }: Props) {
               contentContainerStyle={styles.panelScrollContent}
               showsVerticalScrollIndicator
             >
-              {PLACEHOLDER_EXAMPLES.map((example) => (
-                <View key={example.id} style={styles.exampleRow}>
-                  <Text style={styles.exampleTitle} numberOfLines={2}>
-                    {example.title}
-                  </Text>
-                  <View style={styles.exampleActions}>
-                    <Pressable
-                      accessibilityRole="button"
-                      style={({ pressed }) => [
-                        styles.rowAction,
-                        pressed && styles.rowActionPressed,
-                      ]}
-                    >
-                      <Text style={styles.rowActionLabel}>単独で解く</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      style={({ pressed }) => [
-                        styles.rowAction,
-                        styles.rowActionSecondary,
-                        pressed && styles.rowActionPressed,
-                      ]}
-                    >
-                      <Text style={styles.rowActionLabelSecondary}>編集</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      style={({ pressed }) => [
-                        styles.rowAction,
-                        styles.rowActionDanger,
-                        pressed && styles.rowActionPressed,
-                      ]}
-                    >
-                      <Text style={styles.rowActionLabelDanger}>削除</Text>
-                    </Pressable>
+              {examplesLoading ? (
+                <Text style={styles.panelLead}>例題を読み込み中…</Text>
+              ) : examplesError ? (
+                <Text style={styles.panelLead}>{examplesError}</Text>
+              ) : examples.length === 0 ? (
+                <Text style={styles.panelLead}>
+                  まだ例題がありません。「＋例題を新規作成」から追加できます。
+                </Text>
+              ) : (
+                examples.map((example) => (
+                  <View key={example.id} style={styles.exampleRow}>
+                    <Text style={styles.exampleTitle} numberOfLines={2}>
+                      {example.title}
+                    </Text>
+                    <View style={styles.exampleActions}>
+                      <Pressable
+                        accessibilityRole="button"
+                        style={({ pressed }) => [
+                          styles.rowAction,
+                          pressed && styles.rowActionPressed,
+                        ]}
+                      >
+                        <Text style={styles.rowActionLabel}>単独で解く</Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        style={({ pressed }) => [
+                          styles.rowAction,
+                          styles.rowActionSecondary,
+                          pressed && styles.rowActionPressed,
+                        ]}
+                      >
+                        <Text style={styles.rowActionLabelSecondary}>編集</Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        style={({ pressed }) => [
+                          styles.rowAction,
+                          styles.rowActionDanger,
+                          pressed && styles.rowActionPressed,
+                        ]}
+                      >
+                        <Text style={styles.rowActionLabelDanger}>削除</Text>
+                      </Pressable>
+                    </View>
                   </View>
-                </View>
-              ))}
+                ))
+              )}
             </ScrollView>
           </View>
         </View>
@@ -314,6 +345,17 @@ export function CertMainScreen({ certification, onBack }: Props) {
           </Pressable>
         </View>
       </View>
+
+      <ExampleCreateModal
+        visible={isCreateOpen}
+        certificationId={certification.id}
+        certificationName={certification.name}
+        questionFormat={certification.questionFormat}
+        onClose={() => setIsCreateOpen(false)}
+        onGenerated={() => {
+          void loadExamples();
+        }}
+      />
     </View>
   );
 }
