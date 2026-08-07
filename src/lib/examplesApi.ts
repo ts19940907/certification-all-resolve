@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { getErrorMessage } from './certificationsApi';
+import type { ExampleDiagram } from '../types/diagram';
 import type { ExampleDetail, ExampleSummary, SelectAnswer } from '../types/example';
 
 export type GenerateExampleResult = {
@@ -248,4 +249,44 @@ export async function askExampleChat(args: {
 
 export function getAskErrorMessage(error: unknown) {
   return getErrorMessage(error, 'AIへの質問に失敗しました');
+}
+
+type DiagramEdgeSuccess = {
+  ok: true;
+  diagram: ExampleDiagram;
+};
+
+type DiagramEdgeFailure = {
+  ok: false;
+  error?: string;
+};
+
+/** 例題の図解データを生成 */
+export async function generateExampleDiagram(args: {
+  exampleId: string;
+}): Promise<ExampleDiagram> {
+  const { data, error } = await supabase.functions.invoke('diagram-example', {
+    body: { example_id: args.exampleId },
+  });
+
+  const payload = (data ?? null) as DiagramEdgeSuccess | DiagramEdgeFailure | null;
+
+  if (payload && 'ok' in payload && payload.ok === true) {
+    return payload.diagram;
+  }
+
+  if (payload && 'ok' in payload && payload.ok === false) {
+    throw new Error(payload.error || '図解の作成に失敗しました');
+  }
+
+  if (error) {
+    console.error('[examples] diagram-example invoke', error);
+    throw error;
+  }
+
+  throw new Error('図解の作成に失敗しました');
+}
+
+export function getDiagramErrorMessage(error: unknown) {
+  return getErrorMessage(error, '図解の作成に失敗しました');
 }

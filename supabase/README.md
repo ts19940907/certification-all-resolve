@@ -100,6 +100,15 @@ supabase functions deploy ask-example
 - やり取りがある状態でダイアログを閉じると `histories`（`kind=example_ai_chat`）に保存
 - 実施履歴の「詳細」から同じ例題＋チャットを再開（同じ履歴行を更新）
 
+## 例題図解のPDF
+
+```bash
+supabase functions deploy diagram-example
+```
+
+- 答え合わせ後の「図解を作成」で、問題の問い／選択肢の意味／正解理由の3部構成図解PDFをダウンロード
+- Web／デスクトップ（Electron）向け。`html2pdf.js` を使用
+
 ## 例題の削除
 
 SQL Editor で `migrations/20260807160000_fix_example_delete.sql` を Run。  

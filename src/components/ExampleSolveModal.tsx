@@ -14,10 +14,13 @@ import {
 import {
   askExampleChat,
   fetchExampleDetail,
+  generateExampleDiagram,
   getAskErrorMessage,
+  getDiagramErrorMessage,
   getExampleErrorMessage,
   shuffleChoices,
 } from '../lib/examplesApi';
+import { downloadDiagramPdf } from '../lib/diagramPdf';
 import {
   insertAiChatHistory,
   updateAiChatHistory,
@@ -72,6 +75,7 @@ export function ExampleSolveModal({
   const [chatDraft, setChatDraft] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatSending, setChatSending] = useState(false);
+  const [diagramBusy, setDiagramBusy] = useState(false);
   const [closingBusy, setClosingBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
@@ -94,6 +98,7 @@ export function ExampleSolveModal({
       setChatDraft('');
       setChatMessages([]);
       setChatSending(false);
+      setDiagramBusy(false);
       setClosingBusy(false);
       setNotice(null);
       setActiveHistoryId(null);
@@ -109,6 +114,7 @@ export function ExampleSolveModal({
     setDescriptiveDraft('');
     setChatDraft('');
     setChatSending(false);
+    setDiagramBusy(false);
     setClosingBusy(false);
     setNotice(null);
     setActiveHistoryId(historyIdRef.current);
@@ -208,7 +214,7 @@ export function ExampleSolveModal({
   };
 
   const handleClose = () => {
-    if (chatSending || closingBusy) return;
+    if (chatSending || diagramBusy || closingBusy) return;
     void (async () => {
       setClosingBusy(true);
       try {
@@ -227,12 +233,25 @@ export function ExampleSolveModal({
   };
 
   const handleToggleChat = () => {
-    if (chatSending) return;
+    if (chatSending || diagramBusy) return;
     setChatOpen((prev) => !prev);
   };
 
   const handleCreateDiagram = () => {
-    setNotice('図解を作成する機能は、次の実装で接続します。');
+    if (!example || diagramBusy || chatSending) return;
+    setDiagramBusy(true);
+    void (async () => {
+      try {
+        const diagram = await generateExampleDiagram({
+          exampleId: example.id,
+        });
+        await downloadDiagramPdf(diagram);
+      } catch (err) {
+        setNotice(getDiagramErrorMessage(err));
+      } finally {
+        setDiagramBusy(false);
+      }
+    })();
   };
 
   const handleSendChat = () => {
@@ -282,7 +301,7 @@ export function ExampleSolveModal({
   };
 
   const showChatSide = chatOpen && isWide;
-  const closeLocked = chatSending || closingBusy;
+  const closeLocked = chatSending || diagramBusy || closingBusy;
 
   const examplePanel = example ? (
     <View style={styles.panel}>
@@ -407,26 +426,39 @@ export function ExampleSolveModal({
         <View style={styles.actionRow}>
           <Pressable
             accessibilityRole="button"
+            disabled={diagramBusy || chatSending}
             onPress={handleCreateDiagram}
             style={({ pressed }) => [
               styles.secondaryButton,
-              pressed && styles.secondaryButtonPressed,
+              pressed &&
+                !diagramBusy &&
+                !chatSending &&
+                styles.secondaryButtonPressed,
+              (diagramBusy || chatSending) && styles.secondaryButtonDisabled,
             ]}
           >
-            <Text style={styles.secondaryButtonLabel}>図解を作成</Text>
+            {diagramBusy ? (
+              <View style={styles.buttonBusyRow}>
+                <ActivityIndicator size="small" color={colors.accentDeep} />
+                <Text style={styles.secondaryButtonLabel}>図解を作成中…</Text>
+              </View>
+            ) : (
+              <Text style={styles.secondaryButtonLabel}>図解を作成</Text>
+            )}
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            disabled={chatSending}
+            disabled={chatSending || diagramBusy}
             onPress={handleToggleChat}
             style={({ pressed }) => [
               chatOpen ? styles.closeChatButton : styles.aiButton,
               pressed &&
                 !chatSending &&
+                !diagramBusy &&
                 (chatOpen
                   ? styles.closeChatButtonPressed
                   : styles.aiButtonPressed),
-              chatSending && styles.aiButtonDisabled,
+              (chatSending || diagramBusy) && styles.aiButtonDisabled,
             ]}
           >
             <Text
@@ -1036,10 +1068,18 @@ const styles = StyleSheet.create({
   secondaryButtonPressed: {
     backgroundColor: colors.accentSoft,
   },
+  secondaryButtonDisabled: {
+    opacity: 0.65,
+  },
   secondaryButtonLabel: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 14,
     color: colors.accentDeep,
+  },
+  buttonBusyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   aiButton: {
     backgroundColor: colors.accent,
