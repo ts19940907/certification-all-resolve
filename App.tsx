@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   NotoSansJP_400Regular,
   NotoSansJP_700Bold,
   useFonts,
 } from '@expo-google-fonts/noto-sans-jp';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import type { Session } from '@supabase/supabase-js';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { INITIAL_CERTIFICATIONS } from './src/data/certifications';
+import { supabase } from './src/lib/supabase';
+import { AuthScreen } from './src/screens/AuthScreen';
 import { CertMainScreen } from './src/screens/CertMainScreen';
 import { CertSelectScreen } from './src/screens/CertSelectScreen';
 import { colors } from './src/theme/colors';
@@ -19,11 +22,41 @@ export default function App() {
     NotoSansJP_400Regular,
     NotoSansJP_700Bold,
   });
+  const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [screen, setScreen] = useState<Screen>('select');
   const [certifications, setCertifications] =
     useState<Certification[]>(INITIAL_CERTIFICATIONS);
   const [activeCertification, setActiveCertification] =
     useState<Certification | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) {
+        console.error('[auth] getSession', error);
+      }
+      if (!mounted) return;
+      setSession(data.session);
+      setAuthReady(true);
+    });
+
+    const { data: subscription } = supabase.auth.onAuthStateChange(
+      (_event, nextSession) => {
+        setSession(nextSession);
+        if (!nextSession) {
+          setScreen('select');
+          setActiveCertification(null);
+        }
+      },
+    );
+
+    return () => {
+      mounted = false;
+      subscription.subscription.unsubscribe();
+    };
+  }, []);
 
   const handleSelect = (certification: Certification) => {
     setActiveCertification(certification);
@@ -34,7 +67,14 @@ export default function App() {
     setScreen('select');
   };
 
-  if (!fontsLoaded) {
+  const handleSignOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('[auth] signOut', error);
+    }
+  };
+
+  if (!fontsLoaded || !authReady) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator color={colors.accent} size="large" />
@@ -43,14 +83,40 @@ export default function App() {
     );
   }
 
+  if (!session) {
+    return (
+      <View style={styles.root}>
+        <AuthScreen onAuthenticated={() => undefined} />
+        <StatusBar style="dark" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       {screen === 'select' || !activeCertification ? (
-        <CertSelectScreen
-          certifications={certifications}
-          onCertificationsChange={setCertifications}
-          onSelect={handleSelect}
-        />
+        <View style={styles.selectWrap}>
+          <View style={styles.topBar}>
+            <Text style={styles.topBarEmail} numberOfLines={1}>
+              {session.user.email}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={handleSignOut}
+              style={({ pressed }) => [
+                styles.signOutButton,
+                pressed && styles.signOutButtonPressed,
+              ]}
+            >
+              <Text style={styles.signOutLabel}>ログアウト</Text>
+            </Pressable>
+          </View>
+          <CertSelectScreen
+            certifications={certifications}
+            onCertificationsChange={setCertifications}
+            onSelect={handleSelect}
+          />
+        </View>
       ) : (
         <CertMainScreen certification={activeCertification} onBack={handleBack} />
       )}
@@ -69,5 +135,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.mist,
+  },
+  selectWrap: {
+    flex: 1,
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 4,
+    zIndex: 2,
+  },
+  topBarEmail: {
+    flex: 1,
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    color: colors.inkSoft,
+  },
+  signOutButton: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.paper,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  signOutButtonPressed: {
+    backgroundColor: colors.accentSoft,
+  },
+  signOutLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.accentDeep,
   },
 });
