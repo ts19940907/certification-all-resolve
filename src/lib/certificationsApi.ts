@@ -85,11 +85,92 @@ export async function fetchCertifications(): Promise<Certification[]> {
     .filter((item): item is Certification => item != null);
 }
 
-export async function createCertification(name: string): Promise<Certification> {
+export type CreateCertificationInput = {
+  name: string;
+  questionFormat: number;
+  choiceMin: number | null;
+  choiceMax: number | null;
+  answerMax: number | null;
+};
+
+export type ValidatedCertificationCandidate = {
+  officialName: string;
+  summary: string;
+  officialUrl: string;
+  questionFormat: number;
+  choiceMin: number | null;
+  choiceMax: number | null;
+  answerMax: number | null;
+};
+
+type ValidateSuccess = {
+  ok: true;
+  candidate: {
+    official_name: string;
+    summary: string;
+    official_url: string;
+    question_format: number;
+    choice_min: number | null;
+    choice_max: number | null;
+    answer_max: number | null;
+  };
+};
+
+type ValidateFailure = {
+  ok: false;
+  error_code?: string;
+  error?: string;
+};
+
+export async function validateCertificationQuery(
+  query: string,
+): Promise<ValidatedCertificationCandidate> {
+  await ensureCurrentUserRow();
+
+  const { data, error } = await supabase.functions.invoke(
+    'validate-certification',
+    { body: { query: query.trim() } },
+  );
+
+  const payload = (data ?? null) as ValidateSuccess | ValidateFailure | null;
+
+  if (payload && payload.ok === true) {
+    return {
+      officialName: payload.candidate.official_name,
+      summary: payload.candidate.summary,
+      officialUrl: payload.candidate.official_url,
+      questionFormat: payload.candidate.question_format,
+      choiceMin: payload.candidate.choice_min,
+      choiceMax: payload.candidate.choice_max,
+      answerMax: payload.candidate.answer_max,
+    };
+  }
+
+  if (payload && payload.ok === false && payload.error) {
+    throw new Error(payload.error);
+  }
+
+  if (error) {
+    console.error('[certifications] validate invoke', error);
+    throw new Error(
+      getErrorMessage(error, '資格の照合に失敗しました。時間をおいて再度お試しください。'),
+    );
+  }
+
+  throw new Error('資格の照合に失敗しました。時間をおいて再度お試しください。');
+}
+
+export async function createCertification(
+  input: CreateCertificationInput,
+): Promise<Certification> {
   await ensureCurrentUserRow();
 
   const { data, error } = await supabase.rpc('create_certification', {
-    p_name: name.trim(),
+    p_name: input.name.trim(),
+    p_question_format: input.questionFormat,
+    p_choice_min: input.choiceMin,
+    p_choice_max: input.choiceMax,
+    p_answer_max: input.answerMax,
   });
 
   if (error) {
@@ -102,6 +183,10 @@ export async function createCertification(name: string): Promise<Certification> 
     userCertificationId: string;
     name: string;
     isArchive: boolean;
+    questionFormat?: number;
+    choiceMin?: number | null;
+    choiceMax?: number | null;
+    answerMax?: number | null;
   };
 
   return {
@@ -109,16 +194,16 @@ export async function createCertification(name: string): Promise<Certification> 
     name: row.name,
     isArchive: row.isArchive,
     userCertificationId: row.userCertificationId,
-    questionFormat: 0,
-    choiceMin: null,
-    choiceMax: null,
-    answerMax: null,
+    questionFormat: row.questionFormat ?? input.questionFormat,
+    choiceMin: row.choiceMin ?? input.choiceMin,
+    choiceMax: row.choiceMax ?? input.choiceMax,
+    answerMax: row.answerMax ?? input.answerMax,
   };
 }
 
 export async function renameCertification(
   certificationId: string,
-  name: string,
+  input: CreateCertificationInput,
 ): Promise<void> {
   const canRename = await canRenameCertification(certificationId);
   if (!canRename) {
@@ -127,9 +212,20 @@ export async function renameCertification(
     );
   }
 
+  const format = input.questionFormat & 7;
+  if (format === 0) {
+    throw new Error('対応する出題形式が存在しないため、作成できません');
+  }
+
   const { error } = await supabase
     .from('certifications')
-    .update({ name: name.trim() })
+    .update({
+      name: input.name.trim(),
+      question_format: format,
+      choice_min: input.choiceMin,
+      choice_max: input.choiceMax,
+      answer_max: input.answerMax,
+    })
     .eq('id', certificationId);
 
   if (error) {

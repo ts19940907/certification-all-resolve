@@ -1,0 +1,4 @@
+{
+  "name": "validate-certification",
+  "verify_jwt": true
+}

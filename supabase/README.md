@@ -73,3 +73,17 @@ supabase functions deploy generate-example
 3. アプリで「AIで自動生成」→ 作成中表示のあと一覧に追加される
 
 条件付き生成のAPI接続は未実装（UIの形式選択のみ先行）。
+
+## 資格追加時の照合（正式名称・形式）
+
+1. SQL Editor で `migrations/20260807152000_create_certification_with_format.sql` を Run  
+   （`create_certification` が形式付き引数に置き換わります）
+2. Function をデプロイ:
+
+```bash
+supabase functions deploy validate-certification
+```
+
+3. アプリの「資格を追加／改名」→「照合する」→ 確認ダイアログ → 保存  
+   - 1件に絞れない／特定不能／対応形式なしは登録・改名を拒否
+   - 改名時も正式名称と出題形式レンジを更新（例題・履歴がある資格は従来どおり改名不可）

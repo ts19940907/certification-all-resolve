@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -19,6 +20,8 @@ import {
   getErrorMessage,
   renameCertification,
   setCertificationArchived,
+  validateCertificationQuery,
+  type ValidatedCertificationCandidate,
 } from '../lib/certificationsApi';
 import { colors } from '../theme/colors';
 import type { Certification } from '../types/certification';
@@ -47,6 +50,8 @@ export function CertSelectScreen({ onSelect }: Props) {
   const [restoreTarget, setRestoreTarget] = useState<Certification | null>(null);
   const [restoreFromNameModal, setRestoreFromNameModal] = useState(false);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  const [confirmCandidate, setConfirmCandidate] =
+    useState<ValidatedCertificationCandidate | null>(null);
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
 
@@ -134,6 +139,7 @@ export function CertSelectScreen({ onSelect }: Props) {
     setNameModalMode(null);
     setDraftName('');
     setNameError(null);
+    setConfirmCandidate(null);
   };
 
   const applyRestore = async (cert: Certification) => {
@@ -154,6 +160,76 @@ export function CertSelectScreen({ onSelect }: Props) {
     }
   };
 
+  const handleConfirmSave = async () => {
+    if (!confirmCandidate || busy) return;
+    setBusy(true);
+    try {
+      if (nameModalMode === 'rename') {
+        if (!selected || selected.isArchive) {
+          throw new Error('改名対象の資格が見つかりません');
+        }
+        await renameCertification(selected.id, {
+          name: confirmCandidate.officialName,
+          questionFormat: confirmCandidate.questionFormat,
+          choiceMin: confirmCandidate.choiceMin,
+          choiceMax: confirmCandidate.choiceMax,
+          answerMax: confirmCandidate.answerMax,
+        });
+        await loadCertifications();
+        setConfirmCandidate(null);
+        closeNameModal();
+        return;
+      }
+
+      const created = await createCertification({
+        name: confirmCandidate.officialName,
+        questionFormat: confirmCandidate.questionFormat,
+        choiceMin: confirmCandidate.choiceMin,
+        choiceMax: confirmCandidate.choiceMax,
+        answerMax: confirmCandidate.answerMax,
+      });
+      await loadCertifications();
+      setListTab('active');
+      setSelectedId(created.id);
+      setConfirmCandidate(null);
+      closeNameModal();
+    } catch (error) {
+      console.error('[CertSelectScreen] confirm save', error);
+      const message = getErrorMessage(
+        error,
+        nameModalMode === 'rename'
+          ? '改名に失敗しました。'
+          : '資格の追加に失敗しました。',
+      );
+      setConfirmCandidate(null);
+      if (
+        message.includes('同じ名前') ||
+        message.includes('改名できません') ||
+        message.includes('出題形式')
+      ) {
+        setNameError(message);
+      } else {
+        setNoticeMessage(message);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openOfficialUrl = async (url: string) => {
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (!canOpen) {
+        setNoticeMessage('リンクを開けませんでした。');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch (error) {
+      console.error('[CertSelectScreen] open url', error);
+      setNoticeMessage('リンクを開けませんでした。');
+    }
+  };
+
   const handleNameSubmit = async () => {
     if (!trimmedName || !nameModalMode || busy) return;
 
@@ -170,20 +246,28 @@ export function CertSelectScreen({ onSelect }: Props) {
       }
 
       setBusy(true);
+      setNameError(null);
       try {
-        const created = await createCertification(trimmedName);
-        await loadCertifications();
-        setListTab('active');
-        setSelectedId(created.id);
-        closeNameModal();
-      } catch (error) {
-        console.error('[CertSelectScreen] create', error);
-        const message = getErrorMessage(error, '資格の追加に失敗しました。');
-        if (message.includes('同じ名前')) {
-          setNameError(message);
-        } else {
-          setNoticeMessage(message);
+        const candidate = await validateCertificationQuery(trimmedName);
+        // 正式名称での重複も確認
+        const existingOfficial = findByName(candidate.officialName);
+        if (existingOfficial && !existingOfficial.isArchive) {
+          setNameError(
+            `「${candidate.officialName}」はすでに登録されています`,
+          );
+          return;
         }
+        if (existingOfficial && existingOfficial.isArchive) {
+          setRestoreTarget(existingOfficial);
+          setRestoreFromNameModal(true);
+          return;
+        }
+        setConfirmCandidate(candidate);
+      } catch (error) {
+        console.error('[CertSelectScreen] validate', error);
+        setNoticeMessage(
+          getErrorMessage(error, '資格の照合に失敗しました。'),
+        );
       } finally {
         setBusy(false);
       }
@@ -209,14 +293,26 @@ export function CertSelectScreen({ onSelect }: Props) {
     }
 
     setBusy(true);
+    setNameError(null);
     try {
-      await renameCertification(selected.id, trimmedName);
-      await loadCertifications();
-      closeNameModal();
+      const candidate = await validateCertificationQuery(trimmedName);
+      const existingOfficial = findByName(candidate.officialName, selected.id);
+      if (existingOfficial && !existingOfficial.isArchive) {
+        setNameError(
+          `「${candidate.officialName}」はすでに登録されています`,
+        );
+        return;
+      }
+      if (existingOfficial && existingOfficial.isArchive) {
+        setRestoreTarget(existingOfficial);
+        setRestoreFromNameModal(true);
+        return;
+      }
+      setConfirmCandidate(candidate);
     } catch (error) {
-      console.error('[CertSelectScreen] rename', error);
-      const message = getErrorMessage(error, '改名に失敗しました。');
-      if (message.includes('同じ名前') || message.includes('改名できません')) {
+      console.error('[CertSelectScreen] validate rename', error);
+      const message = getErrorMessage(error, '資格の照合に失敗しました。');
+      if (message.includes('改名できません')) {
         setNameError(message);
       } else {
         setNoticeMessage(message);
@@ -252,9 +348,15 @@ export function CertSelectScreen({ onSelect }: Props) {
   const nameModalTitle = nameModalMode === 'rename' ? '資格名を変更' : '資格を追加';
   const nameModalLead =
     nameModalMode === 'rename'
-      ? '新しい資格名を入力してください'
-      : '学びたい資格名を入力してください';
-  const nameModalSubmitLabel = nameModalMode === 'rename' ? '変更する' : '追加する';
+      ? '新しい資格名を入力してください（変更前に照合します）'
+      : '学びたい資格名を入力してください（追加前に照合します）';
+  const nameModalSubmitLabel = '照合する';
+  const confirmTitle =
+    nameModalMode === 'rename'
+      ? 'この資格に変更しますか？'
+      : 'この資格で登録しますか？';
+  const confirmPrimaryLabel =
+    nameModalMode === 'rename' ? 'この資格に変更' : 'この資格で登録';
   const submitDisabled = !trimmedName || busy;
 
   return (
@@ -493,6 +595,84 @@ export function CertSelectScreen({ onSelect }: Props) {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        visible={confirmCandidate != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!busy) setConfirmCandidate(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => {
+              if (!busy) setConfirmCandidate(null);
+            }}
+          />
+          <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
+            <Text style={styles.modalTitle}>{confirmTitle}</Text>
+            <Text style={styles.modalLead}>
+              勉強したい資格が次で合っているか確認してください。
+            </Text>
+            <Text style={styles.confirmName}>{confirmCandidate?.officialName}</Text>
+            {confirmCandidate?.summary ? (
+              <Text style={styles.confirmSummary}>{confirmCandidate.summary}</Text>
+            ) : null}
+            {confirmCandidate?.officialUrl ? (
+              <Pressable
+                accessibilityRole="link"
+                onPress={() => {
+                  if (confirmCandidate.officialUrl) {
+                    void openOfficialUrl(confirmCandidate.officialUrl);
+                  }
+                }}
+                style={({ pressed }) => [
+                  styles.linkButton,
+                  pressed && styles.linkButtonPressed,
+                ]}
+              >
+                <Text style={styles.linkButtonLabel}>資格サイトを開く</Text>
+              </Pressable>
+            ) : (
+              <Text style={styles.confirmHint}>
+                公式サイトのリンクは特定できませんでした。
+              </Text>
+            )}
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy}
+                onPress={() => setConfirmCandidate(null)}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed && styles.secondaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.secondaryButtonLabel}>違う</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy}
+                onPress={() => {
+                  void handleConfirmSave();
+                }}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.primaryButtonPressed,
+                ]}
+              >
+                {busy ? (
+                  <ActivityIndicator color={colors.paper} />
+                ) : (
+                  <Text style={styles.primaryButtonLabel}>{confirmPrimaryLabel}</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
       </Modal>
 
       <Modal
@@ -903,6 +1083,41 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: colors.inkSoft,
     marginBottom: 16,
+  },
+  confirmName: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 18,
+    lineHeight: 26,
+    color: colors.ink,
+    marginBottom: 8,
+  },
+  confirmSummary: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 14,
+    lineHeight: 22,
+    color: colors.inkSoft,
+    marginBottom: 12,
+  },
+  confirmHint: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.muted,
+    marginBottom: 16,
+  },
+  linkButton: {
+    alignSelf: 'flex-start',
+    marginBottom: 16,
+    paddingVertical: 6,
+  },
+  linkButtonPressed: {
+    opacity: 0.7,
+  },
+  linkButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.accentDeep,
+    textDecorationLine: 'underline',
   },
   input: {
     borderWidth: 1.5,
