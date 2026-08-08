@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>卒業制作ツール概要｜自分専用の問題集＋先生役のAI</title>
+    <style>
+      :root {
+        --ink: #1a2330;
+        --muted: #5a6573;
+        --line: #d7dde5;
+        --paper: #ffffff;
+        --wash: #f3f5f8;
+        --accent: #0e7c7b;
+        --accent-soft: #e6f4f3;
+        --spotlight: #e4572e;
+        --info-bg: #eef5ff;
+        --info-line: #b7cff5;
+        --warn-bg: #fff6ee;
+        --warn-line: #f0c49a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--wash);
+        font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif;
+        line-height: 1.75;
+      }
+
+      main {
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 40px 20px 80px;
+      }
+
+      h1 {
+        font-size: 1.7rem;
+        line-height: 1.4;
+        margin: 0 0 10px;
+      }
+
+      h2 {
+        font-size: 1.28rem;
+        margin: 0 0 12px;
+        padding-bottom: 8px;
+        border-bottom: 2px solid var(--accent-soft);
+      }
+
+      h3 {
+        font-size: 1.05rem;
+        margin: 0 0 8px;
+      }
+
+      p {
+        margin: 0 0 12px;
+      }
+
+      .sub {
+        color: var(--muted);
+        margin-bottom: 28px;
+      }
+
+      .hero {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 22px 22px 18px;
+        margin-bottom: 28px;
+      }
+
+      .hero-label {
+        display: inline-block;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        color: var(--accent);
+        background: var(--accent-soft);
+        border-radius: 999px;
+        padding: 4px 10px;
+        margin-bottom: 12px;
+      }
+
+      .hero p:last-child {
+        margin-bottom: 0;
+      }
+
+      .callout {
+        border: 1px solid var(--line);
+        background: var(--paper);
+        border-radius: 12px;
+        padding: 16px 18px;
+        margin: 0 0 20px;
+      }
+
+      .callout.info {
+        background: var(--info-bg);
+        border-color: var(--info-line);
+      }
+
+      .callout.warn {
+        background: var(--warn-bg);
+        border-color: var(--warn-line);
+      }
+
+      .callout strong.title {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .card {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px 18px;
+      }
+
+      .card ul {
+        margin: 0;
+        padding-left: 1.15em;
+      }
+
+      .card li + li {
+        margin-top: 8px;
+      }
+
+      section {
+        margin-bottom: 40px;
+      }
+
+      .flow-overview {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: stretch;
+        gap: 8px;
+        margin: 16px 0 8px;
+      }
+
+      .flow-step {
+        flex: 1 1 140px;
+        min-width: 130px;
+        background: var(--accent-soft);
+        border: 1px solid #b9d9d5;
+        border-radius: 12px;
+        padding: 12px;
+      }
+
+      .flow-step .n {
+        font-weight: 700;
+        color: var(--accent);
+        font-size: 0.85rem;
+      }
+
+      .flow-step h3 {
+        margin-top: 4px;
+        font-size: 0.95rem;
+      }
+
+      .flow-step p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.84rem;
+        line-height: 1.5;
+      }
+
+      .arrow {
+        align-self: center;
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .step-block {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 18px;
+      }
+
+      .step-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .step-num {
+        flex: 0 0 auto;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .step-head h3 {
+        margin: 2px 0 4px;
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .shot {
+        margin-top: 14px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+        background: #e8eef3;
+      }
+
+      .shot img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .shot-caption {
+        padding: 10px 12px;
+        font-size: 0.82rem;
+        color: var(--muted);
+        background: var(--paper);
+        border-top: 1px solid var(--line);
+      }
+
+      .strength-example {
+        margin-top: 10px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: var(--accent-soft);
+        border: 1px solid #b9d9d5;
+        font-size: 0.92rem;
+      }
+
+      .main-map {
+        display: grid;
+        grid-template-columns: 1fr 1.2fr 1fr;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .main-map .zone {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        background: var(--wash);
+      }
+
+      .main-map .zone h4 {
+        margin: 0 0 6px;
+        font-size: 0.92rem;
+        color: var(--accent);
+      }
+
+      .main-map .zone p {
+        margin: 0;
+        font-size: 0.84rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      .badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #e8eef3;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+
+      .badge.accent {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .badge.hot {
+        background: #fde8e1;
+        color: var(--spotlight);
+      }
+
+      hr {
+        border: 0;
+        border-top: 1px solid var(--line);
+        margin: 8px 0 32px;
+      }
+
+      @media (max-width: 760px) {
+        .grid-2,
+        .main-map {
+          grid-template-columns: 1fr;
+        }
+
+        .arrow {
+          width: 100%;
+          text-align: center;
+          transform: rotate(90deg);
+        }
+      }
+
+      @media print {
+        body {
+          background: #fff;
+        }
+
+        .shot {
+          break-inside: avoid;
+        }
+
+        .step-block {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="hero-label">卒業制作｜ツール概要</p>
+      <h1>資格の勉強を、自分専用の「問題集＋先生役のAI」で進めるツール</h1>
+      <p class="sub">
+        画面はすべて「こう使う想定」のイメージです。レイアウトは今後変わることがあります。
+      </p>
+
+      <div class="hero">
+        <p>
+          <strong>ひとことで言うと</strong><br />
+          学びたい資格を登録し、例題づくり・質問・単語の理解確認・模擬試験までを、ひとつの道具の中で続けられる勉強ツールです。
+        </p>
+      </div>
+
+      <section>
+        <h2>なぜ作ろうとしているか</h2>
+        <div class="callout info">
+          <strong class="title">背景</strong>
+          今年度中に有効期限が切れる資格があり、その再取得を効率よく進めたい、というのが出発点です。
+        </div>
+      </section>
+
+      <section>
+        <h2>このツールの強み</h2>
+        <div class="grid-2">
+          <div class="card">
+            <span class="badge accent">強み 1</span>
+            <h3>勉強の流れが一本につながる</h3>
+            <ul>
+              <li>問題を解く</li>
+              <li>その問題について質問する</li>
+              <li>出てきた単語の理解度を確認する</li>
+            </ul>
+            <p class="muted" style="margin-top: 12px; margin-bottom: 0">
+              別々のアプリやノートを行き来せず、同じ場所で一貫して続けられます。
+            </p>
+          </div>
+          <div class="card">
+            <span class="badge accent">強み 2</span>
+            <h3>合格だけでなく、仕事で使うことも見据える</h3>
+            <p class="muted">
+              ただ試験に受かるためだけでなく、取得後に現場で判断できるようになることを意識しています。
+            </p>
+            <div class="strength-example">
+              <strong>特に「単語の理解度チェック」で確認します。</strong><br />
+              たとえば「データを置くサービスの名前」を暗記するだけでなく、
+              <em>お客様の要望を踏まえて、どのサービスを選ぶべきか</em>
+              まで自分の言葉で説明できるかを、AIに見てもらいます。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <hr />
+
+      <section>
+        <h2>使い方の全体像</h2>
+        <p class="muted">
+          まず資格を登録してメイン画面を開き、そこで例題・質問・単語チェック・模擬試験を行います。やったことは履歴で見返せます。
+        </p>
+        <div class="flow-overview">
+          <div class="flow-step">
+            <div class="n">①</div>
+            <h3>資格を登録</h3>
+            <p>学びたい資格を追加して選ぶ</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-step">
+            <div class="n">②</div>
+            <h3>例題を作る</h3>
+            <p>編集・削除もできる</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-step">
+            <div class="n">③</div>
+            <h3>AIに質問</h3>
+            <p>解説で足りない疑問を聞く</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-step">
+            <div class="n">④</div>
+            <h3>単語チェック</h3>
+            <p>自分の説明をAIが評価</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-step">
+            <div class="n">⑤</div>
+            <h3>模擬試験</h3>
+            <p>本番に近い形で受ける</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>使い方（画面イメージつき）</h2>
+
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num">1</div>
+            <div>
+              <h3>学びたい資格を登録する</h3>
+              <p class="muted" style="margin: 0">
+                資格名を追加し、一覧から選んで勉強を始めます。
+                補足：しばらく使わない資格は「アーカイブ」にしまっておけます（消えるのではなく、あとで戻せます）。
+              </p>
+            </div>
+          </div>
+          <div class="shot">
+            <img
+              src="cert-select.png"
+              alt="資格選択画面のイメージ。資格を追加し、学習中一覧から選んで始める"
+            />
+            <div class="shot-caption">画面イメージ①｜資格の登録・選択</div>
+          </div>
+        </article>
+
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num">2</div>
+            <div>
+              <h3>例題を作る（編集・削除もできる）</h3>
+              <p class="muted" style="margin: 0">
+                AIに任せて作ることも、キーワード・画像・参考リンクなどの条件を付けて作ることもできます。
+                例題が10問以上たまると、ランダムに10〜25問を連続で解くこともできます。
+              </p>
+            </div>
+          </div>
+          <div class="shot">
+            <img
+              src="example-create-screen.png"
+              alt="例題新規作成の画面イメージ。AIに丸投げ、または条件を指定して作成"
+            />
+            <div class="shot-caption">画面イメージ②｜例題の作成</div>
+          </div>
+        </article>
+
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num">3</div>
+            <div>
+              <h3>解説を見てもわからないときは、AIに質問・チャットする</h3>
+              <p class="muted" style="margin: 0">
+                問題・解説の横で、その例題についての疑問を追加で聞けます。解説に書いていない関連の疑問にも答えられます。
+              </p>
+            </div>
+          </div>
+          <div class="shot">
+            <img
+              src="example-ai-question-screen.png"
+              alt="例題詳細画面のイメージ。問題・解説・AIへの質問が並ぶ"
+            />
+            <div class="shot-caption">画面イメージ③｜例題へのAI質問</div>
+          </div>
+        </article>
+
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num">4</div>
+            <div>
+              <h3>必要な単語を、自分の言葉で説明して理解度を確認する</h3>
+              <p class="muted" style="margin: 0">
+                単語とその説明をテキストで送り、AIに内容を評価してもらいます。暗記だけでなく、実務で使える理解かを見るための機能です。
+              </p>
+            </div>
+          </div>
+          <div class="shot">
+            <img
+              src="keyword-review-result.png"
+              alt="キーワードレビュー結果。理解度A〜Dと理由・良い点・改善点"
+            />
+            <div class="shot-caption">画面イメージ④｜キーワード理解度の結果（入力はメイン画面の右側）</div>
+          </div>
+        </article>
+
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num">5</div>
+            <div>
+              <h3>本番さながらの試験を受けられる</h3>
+              <p class="muted" style="margin: 0">
+                メイン画面から、本番に近い形の試験に取り組めます。
+              </p>
+            </div>
+          </div>
+          <div class="callout warn" style="margin-bottom: 0">
+            <strong class="title">①のあと、メイン画面で②〜⑤がそろう</strong>
+            登録した資格を選ぶとメイン画面が開き、例題・単語チェック・模擬試験などをまとめて使えます。
+          </div>
+        </article>
+      </section>
+
+      <section>
+        <h2>メイン画面でできること</h2>
+        <p class="muted">
+          資格を選んだあとの「司令室」です。左に履歴、中央に例題、右に単語チェック、右上に模擬試験、という配置のイメージです。
+        </p>
+        <div class="main-map">
+          <div class="zone">
+            <span class="badge">左</span>
+            <h4>実施履歴</h4>
+            <p>過去の取り組みを新しい順に確認。詳細も開けます。</p>
+          </div>
+          <div class="zone">
+            <span class="badge accent">中央</span>
+            <h4>例題一覧</h4>
+            <p>作成・編集・削除、単独で解く、まとめて解く。</p>
+          </div>
+          <div class="zone">
+            <span class="badge accent">右</span>
+            <h4>単語の自己説明</h4>
+            <p>理解度チェック（④）。実務を見据えた確認。</p>
+          </div>
+        </div>
+        <p class="muted" style="margin-top: 10px">
+          <span class="badge hot">右上</span>
+          「本番試験を実施」から⑤の模擬試験へ。
+        </p>
+        <div class="shot">
+          <img
+            src="cert-main.png"
+            alt="メイン画面のイメージ。履歴・例題一覧・キーワード自己説明"
+          />
+          <div class="shot-caption">画面イメージ｜メイン画面（②〜⑤の入り口）</div>
+        </div>
+      </section>
+
+      <section>
+        <h2>履歴で見返せるもの</h2>
+        <div class="card">
+          <ul>
+            <li>例題でAIに質問した内容</li>
+            <li>単語の理解度チェックで入力した内容と、AIからのフィードバック</li>
+            <li>本番試験（模擬）の結果</li>
+          </ul>
+          <p class="muted" style="margin: 12px 0 0">
+            「いつ・何をして・どうだったか」をあとから振り返れるようにします。
+          </p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

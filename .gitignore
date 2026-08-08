@@ -45,9 +45,6 @@ yarn-error.*
 /ios
 /android
 
-# local docs
-docs/
-
 # Supabase local clutter（migrations / functions / README は追跡する）
 supabase/.branches
 supabase/.temp
