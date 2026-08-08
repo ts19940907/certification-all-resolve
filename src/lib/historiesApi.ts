@@ -3,8 +3,11 @@ import { getErrorMessage } from './certificationsApi';
 import type {
   ExampleAiChatDetail,
   HistoryChatMessage,
+  HistoryDetail,
   HistorySummary,
+  KeywordReviewDetail,
 } from '../types/history';
+import type { KeywordReviewResult } from '../types/keywordReview';
 
 type HistoryRow = {
   id: string;
@@ -46,6 +49,34 @@ function parseAiChatDetail(raw: unknown): ExampleAiChatDetail | null {
   return { example_id: exampleId, messages };
 }
 
+function parseKeywordReviewDetail(raw: unknown): KeywordReviewDetail | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const keyword = String(obj.keyword ?? '').trim();
+  const gradeRaw = String(obj.grade ?? '')
+    .trim()
+    .toUpperCase();
+  const grade =
+    gradeRaw === 'A' || gradeRaw === 'B' || gradeRaw === 'C' || gradeRaw === 'D'
+      ? gradeRaw
+      : null;
+  if (!keyword || !grade) return null;
+  return {
+    keyword,
+    explanation: String(obj.explanation ?? ''),
+    grade,
+    reason: String(obj.reason ?? ''),
+    good_points: String(obj.good_points ?? ''),
+    bad_points: String(obj.bad_points ?? ''),
+  };
+}
+
+function parseDetail(kind: string, raw: unknown): HistoryDetail | null {
+  if (kind === 'example_ai_chat') return parseAiChatDetail(raw);
+  if (kind === 'keyword_review') return parseKeywordReviewDetail(raw);
+  return null;
+}
+
 function mapHistory(row: HistoryRow): HistorySummary {
   return {
     id: row.id,
@@ -54,8 +85,7 @@ function mapHistory(row: HistoryRow): HistorySummary {
     summary: row.summary,
     performedAt: formatPerformedAt(row.performed_at),
     performedAtRaw: row.performed_at,
-    detail:
-      row.kind === 'example_ai_chat' ? parseAiChatDetail(row.detail) : null,
+    detail: parseDetail(row.kind, row.detail),
   };
 }
 
@@ -142,6 +172,43 @@ export async function updateAiChatHistory(args: {
     console.error('[histories] update ai chat', error);
     throw error;
   }
+}
+
+export function buildKeywordReviewHistoryTitle(keyword: string): string {
+  const trimmed = keyword.trim();
+  return trimmed
+    ? `キーワードレビュー — ${trimmed}`
+    : 'キーワードレビュー';
+}
+
+export function buildKeywordReviewHistorySummary(
+  review: Pick<KeywordReviewResult, 'grade'>,
+): string {
+  return `理解度 ${review.grade}`;
+}
+
+export async function insertKeywordReviewHistory(args: {
+  certificationId: string;
+  review: KeywordReviewResult;
+}): Promise<string> {
+  const { data, error } = await supabase
+    .from('histories')
+    .insert({
+      certification_id: args.certificationId,
+      kind: 'keyword_review',
+      title: buildKeywordReviewHistoryTitle(args.review.keyword),
+      summary: buildKeywordReviewHistorySummary(args.review),
+      detail: args.review,
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('[histories] insert keyword review', error);
+    throw error;
+  }
+
+  return data.id as string;
 }
 
 export async function exampleExists(exampleId: string): Promise<boolean> {

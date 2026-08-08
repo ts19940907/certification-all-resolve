@@ -109,6 +109,16 @@ supabase functions deploy diagram-example
 - 答え合わせ後の「図解を作成」で、問題の問い／選択肢の意味／正解理由の3部構成図解PDFをダウンロード
 - Web／デスクトップ（Electron）向け。`html2pdf.js` を使用
 
+## キーワードの自己説明レビュー
+
+```bash
+supabase functions deploy review-keyword
+```
+
+- メイン画面右側でキーワード＋説明を入力し「レビューを実施する」
+- AIが理解度を A〜D（Aが最高）で評価し、理由・良い点・改善点を返す
+- 結果は `histories`（`kind=keyword_review`）に保存。実施履歴の「詳細」から再表示可能
+
 ## 例題の削除
 
 SQL Editor で `migrations/20260807160000_fix_example_delete.sql` を Run。  

@@ -1,4 +1,6 @@
-export type HistoryKind = 'example_ai_chat';
+import type { KeywordReviewResult } from './keywordReview';
+
+export type HistoryKind = 'example_ai_chat' | 'keyword_review';
 
 export type HistoryChatMessage = {
   id: string;
@@ -11,6 +13,10 @@ export type ExampleAiChatDetail = {
   messages: HistoryChatMessage[];
 };
 
+export type KeywordReviewDetail = KeywordReviewResult;
+
+export type HistoryDetail = ExampleAiChatDetail | KeywordReviewDetail;
+
 export type HistorySummary = {
   id: string;
   kind: HistoryKind | string;
@@ -18,5 +24,29 @@ export type HistorySummary = {
   summary: string;
   performedAt: string;
   performedAtRaw: string;
-  detail: ExampleAiChatDetail | null;
+  detail: HistoryDetail | null;
 };
+
+export function isExampleAiChatDetail(
+  detail: HistoryDetail | null,
+  kind: string,
+): detail is ExampleAiChatDetail {
+  return (
+    kind === 'example_ai_chat' &&
+    detail != null &&
+    'example_id' in detail &&
+    'messages' in detail
+  );
+}
+
+export function isKeywordReviewDetail(
+  detail: HistoryDetail | null,
+  kind: string,
+): detail is KeywordReviewDetail {
+  return (
+    kind === 'keyword_review' &&
+    detail != null &&
+    'keyword' in detail &&
+    'grade' in detail
+  );
+}

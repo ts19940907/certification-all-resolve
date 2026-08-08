@@ -18,11 +18,24 @@ import {
   exampleExists,
   fetchHistories,
   getHistoryErrorMessage,
+  insertKeywordReviewHistory,
 } from '../lib/historiesApi';
+import {
+  getKeywordReviewErrorMessage,
+  reviewKeyword,
+} from '../lib/keywordReviewApi';
 import { colors } from '../theme/colors';
 import type { Certification } from '../types/certification';
 import type { ExampleSummary } from '../types/example';
-import type { HistoryChatMessage, HistorySummary } from '../types/history';
+import type {
+  HistoryChatMessage,
+  HistorySummary,
+} from '../types/history';
+import {
+  isExampleAiChatDetail,
+  isKeywordReviewDetail,
+} from '../types/history';
+import type { KeywordReviewResult, UnderstandingGrade } from '../types/keywordReview';
 
 type Props = {
   certification: Certification;
@@ -44,6 +57,19 @@ function clampQuestionCount(value: number) {
   return Math.min(MAX_QUESTION_COUNT, Math.max(MIN_QUESTION_COUNT, value));
 }
 
+function gradeAccent(grade: UnderstandingGrade): string {
+  switch (grade) {
+    case 'A':
+      return colors.accent;
+    case 'B':
+      return '#2F9E8E';
+    case 'C':
+      return '#C2811A';
+    case 'D':
+      return colors.spotlight;
+  }
+}
+
 export function CertMainScreen({ certification, onBack }: Props) {
   const { width } = useWindowDimensions();
   const isWide = width >= 900;
@@ -62,6 +88,11 @@ export function CertMainScreen({ certification, onBack }: Props) {
   const [histories, setHistories] = useState<HistorySummary[]>([]);
   const [historiesError, setHistoriesError] = useState<string | null>(null);
   const [historiesLoading, setHistoriesLoading] = useState(true);
+  const [keywordText, setKeywordText] = useState('');
+  const [keywordExplain, setKeywordExplain] = useState('');
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [keywordReviewResult, setKeywordReviewResult] =
+    useState<KeywordReviewResult | null>(null);
 
   const loadExamples = useCallback(async () => {
     setExamplesLoading(true);
@@ -109,10 +140,16 @@ export function CertMainScreen({ certification, onBack }: Props) {
   };
 
   const openHistoryDetail = async (item: HistorySummary) => {
-    if (item.kind !== 'example_ai_chat' || !item.detail?.example_id) {
+    if (isKeywordReviewDetail(item.detail, item.kind)) {
+      setKeywordReviewResult(item.detail);
+      return;
+    }
+
+    if (!isExampleAiChatDetail(item.detail, item.kind)) {
       setNoticeMessage('この履歴の詳細表示にはまだ対応していません。');
       return;
     }
+
     try {
       const exists = await exampleExists(item.detail.example_id);
       if (!exists) {
@@ -131,6 +168,31 @@ export function CertMainScreen({ certification, onBack }: Props) {
       setNoticeMessage(
         getHistoryErrorMessage(error, '履歴の詳細を開けませんでした。'),
       );
+    }
+  };
+
+  const canReview =
+    keywordText.trim().length > 0 && keywordExplain.trim().length > 0;
+
+  const handleKeywordReview = async () => {
+    if (!canReview || reviewBusy) return;
+    setReviewBusy(true);
+    try {
+      const review = await reviewKeyword({
+        certificationId: certification.id,
+        keyword: keywordText.trim(),
+        explanation: keywordExplain.trim(),
+      });
+      await insertKeywordReviewHistory({
+        certificationId: certification.id,
+        review,
+      });
+      setKeywordReviewResult(review);
+      await loadHistories();
+    } catch (error) {
+      setNoticeMessage(getKeywordReviewErrorMessage(error));
+    } finally {
+      setReviewBusy(false);
     }
   };
 
@@ -417,7 +479,9 @@ export function CertMainScreen({ certification, onBack }: Props) {
 
           <Text style={styles.fieldLabel}>キーワード</Text>
           <TextInput
-            editable
+            editable={!reviewBusy}
+            value={keywordText}
+            onChangeText={setKeywordText}
             placeholder="キーワードを入力"
             placeholderTextColor={colors.muted}
             style={styles.keywordNameInput}
@@ -426,7 +490,9 @@ export function CertMainScreen({ certification, onBack }: Props) {
           <Text style={styles.fieldLabel}>説明</Text>
           <TextInput
             multiline
-            editable
+            editable={!reviewBusy}
+            value={keywordExplain}
+            onChangeText={setKeywordExplain}
             placeholder="自分の言葉で説明を入力"
             placeholderTextColor={colors.muted}
             style={styles.keywordExplainInput}
@@ -435,12 +501,28 @@ export function CertMainScreen({ certification, onBack }: Props) {
 
           <Pressable
             accessibilityRole="button"
+            disabled={!canReview || reviewBusy}
+            onPress={() => {
+              void handleKeywordReview();
+            }}
             style={({ pressed }) => [
               styles.reviewButton,
-              pressed && styles.reviewButtonPressed,
+              pressed && canReview && !reviewBusy && styles.reviewButtonPressed,
+              (!canReview || reviewBusy) && styles.reviewButtonDisabled,
             ]}
           >
-            <Text style={styles.reviewButtonLabel}>レビューを実施する</Text>
+            {reviewBusy ? (
+              <ActivityIndicator color={colors.paper} />
+            ) : (
+              <Text
+                style={[
+                  styles.reviewButtonLabel,
+                  !canReview && styles.reviewButtonLabelDisabled,
+                ]}
+              >
+                レビューを実施する
+              </Text>
+            )}
           </Pressable>
         </View>
       </View>
@@ -519,6 +601,86 @@ export function CertMainScreen({ certification, onBack }: Props) {
                 ) : (
                   <Text style={styles.modalDangerButtonLabel}>OK</Text>
                 )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={keywordReviewResult != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setKeywordReviewResult(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setKeywordReviewResult(null)}
+          />
+          <View
+            style={[
+              styles.modalCard,
+              styles.reviewResultCard,
+              isWide && styles.modalCardWide,
+            ]}
+          >
+            <Text style={styles.modalTitle}>キーワードレビュー結果</Text>
+            {keywordReviewResult ? (
+              <ScrollView
+                style={styles.reviewResultScroll}
+                contentContainerStyle={styles.reviewResultContent}
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={styles.reviewResultKeyword}>
+                  {keywordReviewResult.keyword}
+                </Text>
+                <View
+                  style={[
+                    styles.gradeBadge,
+                    {
+                      backgroundColor: gradeAccent(keywordReviewResult.grade),
+                    },
+                  ]}
+                >
+                  <Text style={styles.gradeBadgeLabel}>
+                    理解度 {keywordReviewResult.grade}
+                  </Text>
+                </View>
+
+                <Text style={styles.reviewResultSectionTitle}>
+                  なぜこの評価か
+                </Text>
+                <Text style={styles.reviewResultBody}>
+                  {keywordReviewResult.reason || '（理由なし）'}
+                </Text>
+
+                <Text style={styles.reviewResultSectionTitle}>良い点</Text>
+                <Text style={styles.reviewResultBody}>
+                  {keywordReviewResult.good_points || '（記載なし）'}
+                </Text>
+
+                <Text style={styles.reviewResultSectionTitle}>改善点</Text>
+                <Text style={styles.reviewResultBody}>
+                  {keywordReviewResult.bad_points || '（記載なし）'}
+                </Text>
+
+                <Text style={styles.reviewResultSectionTitle}>提出した説明</Text>
+                <Text style={styles.reviewResultExplain}>
+                  {keywordReviewResult.explanation}
+                </Text>
+              </ScrollView>
+            ) : null}
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setKeywordReviewResult(null)}
+                style={({ pressed }) => [
+                  styles.modalPrimaryButton,
+                  pressed && styles.modalPrimaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.modalPrimaryButtonLabel}>閉じる</Text>
               </Pressable>
             </View>
           </View>
@@ -998,10 +1160,64 @@ const styles = StyleSheet.create({
   reviewButtonPressed: {
     backgroundColor: colors.accentDeep,
   },
+  reviewButtonDisabled: {
+    backgroundColor: colors.line,
+  },
   reviewButtonLabel: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 14,
     color: colors.paper,
+  },
+  reviewButtonLabelDisabled: {
+    color: colors.muted,
+  },
+  reviewResultCard: {
+    maxHeight: '88%',
+  },
+  reviewResultScroll: {
+    maxHeight: 420,
+  },
+  reviewResultContent: {
+    gap: 8,
+    paddingBottom: 4,
+  },
+  reviewResultKeyword: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 16,
+    color: colors.ink,
+  },
+  gradeBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginBottom: 6,
+  },
+  gradeBadgeLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 18,
+    color: colors.paper,
+  },
+  reviewResultSectionTitle: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.inkSoft,
+    marginTop: 8,
+  },
+  reviewResultBody: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 14,
+    lineHeight: 22,
+    color: colors.ink,
+  },
+  reviewResultExplain: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    lineHeight: 21,
+    color: colors.inkSoft,
+    backgroundColor: colors.mist,
+    borderRadius: 10,
+    padding: 12,
   },
   modalOverlay: {
     flex: 1,
