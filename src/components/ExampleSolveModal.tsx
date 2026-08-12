@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -317,6 +318,20 @@ export function ExampleSolveModal({
       ) : null}
 
       <Text style={styles.questionText}>Q. {example.question}</Text>
+
+      {example.questionImageUrls.length > 0 ? (
+        <View style={styles.questionImages}>
+          {example.questionImageUrls.map((uri) => (
+            <Image
+              key={uri}
+              source={{ uri }}
+              style={styles.questionImage}
+              resizeMode="contain"
+              accessibilityLabel="問題の図"
+            />
+          ))}
+        </View>
+      ) : null}
 
       {isSelect ? (
         <View style={styles.choiceList}>
@@ -903,6 +918,18 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     color: colors.ink,
     marginBottom: 16,
+  },
+  questionImages: {
+    gap: 10,
+    marginBottom: 16,
+  },
+  questionImage: {
+    width: '100%',
+    height: 220,
+    borderRadius: 12,
+    backgroundColor: colors.mist,
+    borderWidth: 1,
+    borderColor: colors.line,
   },
   choiceList: {
     gap: 10,

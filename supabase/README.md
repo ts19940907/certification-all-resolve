@@ -72,7 +72,22 @@ supabase functions deploy generate-example
 
 3. アプリで「AIで自動生成」→ 作成中表示のあと一覧に追加される
 
-条件付き生成のAPI接続は未実装（UIの形式選択のみ先行）。
+### C. 条件付き生成（形式・キーワード・参考リンク・画像）
+
+1. SQL Editor で `migrations/20260808120000_example_images_storage.sql` を Run  
+   （`example-images` バケットと RLS）
+2. 画像再生成モデル（任意。未設定時は `gemini-2.5-flash-image`）:
+
+```bash
+supabase secrets set GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
+supabase functions deploy generate-example
+```
+
+3. アプリの「条件付きで生成」
+   - 形式が「おまかせ」かつキーワード・画像・参考リンクがすべて空のときはボタン非活性
+   - 参考リンクはページを取得し、出題向け情報を抽出してプロンプトへ
+   - 画像は AI が出題利用可否を判定。使える場合はそのまま、使えない場合は描き直して `question_images`（Storage）へ保存
+   - 解答画面で問題図を表示
 
 ## 資格追加時の照合（正式名称・形式）
 

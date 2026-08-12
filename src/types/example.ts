@@ -56,6 +56,14 @@ export type ExampleDetail = {
   answer: string;
   explanation: string;
   choices: SelectAnswer[];
+  /** 署名付きURL（表示用）。無い場合は空配列 */
+  questionImageUrls: string[];
+};
+
+export type ConditionedImagePayload = {
+  mimeType: string;
+  dataBase64: string;
+  fileName: string;
 };
 
 /** answer が空なら選択式、否则記述式 */

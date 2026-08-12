@@ -1,11 +1,22 @@
 import { supabase } from './supabase';
 import { getErrorMessage } from './certificationsApi';
 import type { ExampleDiagram } from '../types/diagram';
-import type { ExampleDetail, ExampleSummary, SelectAnswer } from '../types/example';
+import type {
+  ConditionedFormatChoice,
+  ConditionedImagePayload,
+  ExampleDetail,
+  ExampleSummary,
+  SelectAnswer,
+} from '../types/example';
 
 export type GenerateExampleResult = {
   id: string;
   title: string;
+  imageMeta?: {
+    usedOriginal: boolean;
+    redrawn: boolean;
+    reason: string | null;
+  } | null;
 };
 
 type EdgeSuccess = {
@@ -62,6 +73,22 @@ export async function fetchExamples(
   }));
 }
 
+async function signQuestionImageUrls(paths: string[]): Promise<string[]> {
+  const urls: string[] = [];
+  for (const path of paths) {
+    if (!path) continue;
+    const { data, error } = await supabase.storage
+      .from('example-images')
+      .createSignedUrl(path, 60 * 60);
+    if (error || !data?.signedUrl) {
+      console.error('[examples] signed url', path, error);
+      continue;
+    }
+    urls.push(data.signedUrl);
+  }
+  return urls;
+}
+
 export async function fetchExampleDetail(
   exampleId: string,
 ): Promise<ExampleDetail> {
@@ -74,6 +101,7 @@ export async function fetchExampleDetail(
       question,
       answer,
       explanation,
+      question_images,
       select_answer (
         id,
         value,
@@ -96,6 +124,10 @@ export async function fetchExampleDetail(
       ? [data.select_answer as SelectAnswerRow]
       : [];
 
+  const imagePaths = Array.isArray(data.question_images)
+    ? (data.question_images as string[])
+    : [];
+
   return {
     id: data.id as string,
     title: data.title as string,
@@ -103,6 +135,7 @@ export async function fetchExampleDetail(
     answer: (data.answer as string) ?? '',
     explanation: (data.explanation as string) ?? '',
     choices: choicesRaw.map(mapChoice),
+    questionImageUrls: await signQuestionImageUrls(imagePaths),
   };
 }
 
@@ -130,35 +163,45 @@ export function shuffleChoices<T>(items: T[]): T[] {
   return next;
 }
 
-/**
- * おまかせ生成。整合失敗など retryable な場合は成功するまで再試行する。
- * signal でキャンセル可。
- */
-export async function generateExampleAuto(args: {
-  certificationId: string;
-  signal?: AbortSignal;
-}): Promise<GenerateExampleResult> {
-  const { certificationId, signal } = args;
+type EdgeSuccessFull = EdgeSuccess & {
+  image?: {
+    used_original?: boolean;
+    redrawn?: boolean;
+    reason?: string | null;
+  } | null;
+};
 
+async function invokeGenerateExample(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<GenerateExampleResult> {
   while (true) {
     if (signal?.aborted) {
       throw new DOMException('Aborted', 'AbortError');
     }
 
     const { data, error } = await supabase.functions.invoke('generate-example', {
-      body: { certification_id: certificationId },
+      body,
     });
 
     if (signal?.aborted) {
       throw new DOMException('Aborted', 'AbortError');
     }
 
-    const payload = (data ?? null) as EdgeSuccess | EdgeFailure | null;
+    const payload = (data ?? null) as EdgeSuccessFull | EdgeFailure | null;
 
     if (payload && 'ok' in payload && payload.ok === true) {
+      const image = payload.image;
       return {
         id: payload.example.id,
         title: payload.example.title,
+        imageMeta: image
+          ? {
+              usedOriginal: Boolean(image.used_original),
+              redrawn: Boolean(image.redrawn),
+              reason: image.reason ?? null,
+            }
+          : null,
       };
     }
 
@@ -176,6 +219,50 @@ export async function generateExampleAuto(args: {
     }
     await sleep(800, signal);
   }
+}
+
+/**
+ * おまかせ生成。整合失敗など retryable な場合は成功するまで再試行する。
+ * signal でキャンセル可。
+ */
+export async function generateExampleAuto(args: {
+  certificationId: string;
+  signal?: AbortSignal;
+}): Promise<GenerateExampleResult> {
+  return invokeGenerateExample(
+    { certification_id: args.certificationId, mode: 'auto' },
+    args.signal,
+  );
+}
+
+/**
+ * 条件付き生成（形式・キーワード・参考URL・画像）。
+ * 画像は AI が出題利用可否を判定し、不可なら描き直して Storage に保存する。
+ */
+export async function generateExampleConditioned(args: {
+  certificationId: string;
+  format: ConditionedFormatChoice;
+  keywords: string;
+  referenceUrl: string;
+  image?: ConditionedImagePayload | null;
+  signal?: AbortSignal;
+}): Promise<GenerateExampleResult> {
+  return invokeGenerateExample(
+    {
+      certification_id: args.certificationId,
+      mode: 'conditioned',
+      format: args.format,
+      keywords: args.keywords.trim(),
+      reference_url: args.referenceUrl.trim(),
+      image: args.image
+        ? {
+            mime_type: args.image.mimeType,
+            data_base64: args.image.dataBase64,
+          }
+        : null,
+    },
+    args.signal,
+  );
 }
 
 function sleep(ms: number, signal?: AbortSignal) {

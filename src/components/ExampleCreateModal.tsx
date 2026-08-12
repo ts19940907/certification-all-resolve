@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -13,6 +14,7 @@ import {
 } from 'react-native';
 import {
   generateExampleAuto,
+  generateExampleConditioned,
   getGenerateErrorMessage,
 } from '../lib/examplesApi';
 import { colors } from '../theme/colors';
@@ -20,8 +22,50 @@ import {
   listEnabledFormats,
   questionFormatLabel,
   type ConditionedFormatChoice,
+  type ConditionedImagePayload,
   type QuestionFormatBit,
 } from '../types/example';
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+]);
+
+function readFileAsConditionedImage(
+  file: File,
+): Promise<ConditionedImagePayload> {
+  return new Promise((resolve, reject) => {
+    const mime = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
+    if (!ALLOWED_IMAGE_TYPES.has(mime)) {
+      reject(new Error('画像は PNG / JPG / WebP のみ対応しています。'));
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      reject(new Error('画像サイズは最大5MBまでです。'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('画像の読み込みに失敗しました。'));
+    reader.onload = () => {
+      const result = String(reader.result ?? '');
+      const comma = result.indexOf(',');
+      const dataBase64 = comma >= 0 ? result.slice(comma + 1) : result;
+      if (!dataBase64) {
+        reject(new Error('画像の読み込みに失敗しました。'));
+        return;
+      }
+      resolve({
+        mimeType: mime === 'image/jpg' ? 'image/jpeg' : mime,
+        dataBase64,
+        fileName: file.name || 'image',
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 type CreateTab = 'ai' | 'manual';
 
@@ -49,6 +93,9 @@ export function ExampleCreateModal({
   const [referenceUrl, setReferenceUrl] = useState('');
   const [formatChoice, setFormatChoice] =
     useState<ConditionedFormatChoice>('auto');
+  const [conditionedImage, setConditionedImage] =
+    useState<ConditionedImagePayload | null>(null);
+  const [imagePreviewUri, setImagePreviewUri] = useState<string | null>(null);
   const [manualTitle, setManualTitle] = useState('');
   const [manualQuestion, setManualQuestion] = useState('');
   const [manualAnswer, setManualAnswer] = useState('');
@@ -56,27 +103,83 @@ export function ExampleCreateModal({
   const [notice, setNotice] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const enabledFormats = useMemo(
     () => listEnabledFormats(questionFormat),
     [questionFormat],
   );
 
+  const canConditionedGenerate = useMemo(() => {
+    if (formatChoice !== 'auto') return true;
+    return (
+      keywords.trim().length > 0 ||
+      referenceUrl.trim().length > 0 ||
+      conditionedImage != null
+    );
+  }, [formatChoice, keywords, referenceUrl, conditionedImage]);
+
   useEffect(() => {
     if (!visible) return;
     setFormatChoice('auto');
   }, [visible, questionFormat]);
+
+  const clearConditionedImage = () => {
+    setConditionedImage(null);
+    setImagePreviewUri(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
 
   const resetFields = () => {
     setTab('ai');
     setKeywords('');
     setReferenceUrl('');
     setFormatChoice('auto');
+    clearConditionedImage();
     setManualTitle('');
     setManualQuestion('');
     setManualAnswer('');
     setManualExplanation('');
     setNotice(null);
+  };
+
+  const pickImageFromFileList = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    try {
+      const payload = await readFileAsConditionedImage(file);
+      setConditionedImage(payload);
+      setImagePreviewUri(
+        `data:${payload.mimeType};base64,${payload.dataBase64}`,
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : '画像の読み込みに失敗しました。',
+      );
+    }
+  };
+
+  const openImagePicker = () => {
+    if (Platform.OS !== 'web' || isGenerating) return;
+    if (typeof document === 'undefined') {
+      setNotice('画像アップロードは Web / デスクトップ版で利用できます。');
+      return;
+    }
+    let input = fileInputRef.current;
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/png,image/jpeg,image/webp';
+      input.style.display = 'none';
+      input.onchange = () => {
+        void pickImageFromFileList(input?.files ?? null);
+      };
+      document.body.appendChild(input);
+      fileInputRef.current = input;
+    }
+    input.click();
   };
 
   const cancelGeneration = () => {
@@ -121,10 +224,38 @@ export function ExampleCreateModal({
     }
   };
 
-  const handleConditionedGenerate = () => {
-    setNotice(
-      '条件付き生成（キーワード・形式指定・画像・参考リンク）のAPI接続は次の実装です。いまはおまかせ生成のみ利用できます。',
-    );
+  const handleConditionedGenerate = async () => {
+    if (isGenerating || !canConditionedGenerate) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setIsGenerating(true);
+    setNotice(null);
+
+    try {
+      const example = await generateExampleConditioned({
+        certificationId,
+        format: formatChoice,
+        keywords,
+        referenceUrl,
+        image: conditionedImage,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      onGenerated?.(example);
+      resetFields();
+      setIsGenerating(false);
+      abortRef.current = null;
+      onClose();
+    } catch (error) {
+      if (controller.signal.aborted) {
+        setIsGenerating(false);
+        abortRef.current = null;
+        return;
+      }
+      setIsGenerating(false);
+      abortRef.current = null;
+      setNotice(getGenerateErrorMessage(error));
+    }
   };
 
   const formatOptions: Array<{
@@ -289,12 +420,52 @@ export function ExampleCreateModal({
 
                     <Text style={styles.fieldLabel}>入れてほしい画像（任意）</Text>
                     <View style={styles.dropZone}>
-                      <Text style={styles.dropZoneTitle}>
-                        画像を選択 または ドラッグ＆ドロップ
-                      </Text>
-                      <Text style={styles.dropZoneHint}>
-                        PNG, JPG, WebP（最大5MB）※アップロード接続は次の実装
-                      </Text>
+                      {imagePreviewUri ? (
+                        <>
+                          <Image
+                            source={{ uri: imagePreviewUri }}
+                            style={styles.imagePreview}
+                            resizeMode="contain"
+                          />
+                          <Text style={styles.dropZoneTitle}>
+                            {conditionedImage?.fileName ?? '選択済み'}
+                          </Text>
+                          <View style={styles.imageActions}>
+                            <Pressable
+                              accessibilityRole="button"
+                              disabled={isGenerating}
+                              onPress={openImagePicker}
+                              style={styles.changeImageButton}
+                            >
+                              <Text style={styles.changeImageLabel}>差し替え</Text>
+                            </Pressable>
+                            <Pressable
+                              accessibilityRole="button"
+                              disabled={isGenerating}
+                              onPress={clearConditionedImage}
+                              style={styles.removeImageButton}
+                            >
+                              <Text style={styles.removeImageLabel}>外す</Text>
+                            </Pressable>
+                          </View>
+                        </>
+                      ) : (
+                        <Pressable
+                          accessibilityRole="button"
+                          disabled={isGenerating}
+                          onPress={openImagePicker}
+                          style={({ pressed }) => [
+                            styles.dropZoneInner,
+                            pressed && styles.dropZonePressed,
+                            isGenerating && styles.disabled,
+                          ]}
+                        >
+                          <Text style={styles.dropZoneTitle}>画像を選択</Text>
+                          <Text style={styles.dropZoneHint}>
+                            PNG, JPG, WebP（最大5MB）／Web・デスクトップ向け
+                          </Text>
+                        </Pressable>
+                      )}
                     </View>
 
                     <Text style={styles.fieldLabel}>参考リンク（任意）</Text>
@@ -311,18 +482,21 @@ export function ExampleCreateModal({
 
                     <View style={styles.infoBox}>
                       <Text style={styles.infoText}>
-                        形式・キーワードを指定して生成します（API接続は次の実装）。
+                        参考リンクはページ内容を取得して出題材料に使います。画像は出題に使えるかAIが判定し、使えなければ描き直して問題に載せます。
                       </Text>
                     </View>
 
                     <Pressable
                       accessibilityRole="button"
-                      disabled={isGenerating}
-                      onPress={handleConditionedGenerate}
+                      disabled={isGenerating || !canConditionedGenerate}
+                      onPress={() => {
+                        void handleConditionedGenerate();
+                      }}
                       style={({ pressed }) => [
                         styles.primaryButton,
                         pressed && styles.primaryButtonPressed,
-                        isGenerating && styles.disabled,
+                        (isGenerating || !canConditionedGenerate) &&
+                          styles.disabled,
                       ]}
                     >
                       <Text style={styles.primaryButtonLabel}>条件付きで生成</Text>
@@ -654,17 +828,27 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     borderColor: colors.line,
     borderRadius: 10,
-    paddingVertical: 18,
+    paddingVertical: 12,
     paddingHorizontal: 12,
     alignItems: 'center',
     backgroundColor: colors.mist,
     marginBottom: 12,
+    gap: 8,
+  },
+  dropZoneInner: {
+    width: '100%',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 4,
+  },
+  dropZonePressed: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
   },
   dropZoneTitle: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 13,
     color: colors.inkSoft,
-    marginBottom: 4,
     textAlign: 'center',
   },
   dropZoneHint: {
@@ -672,6 +856,38 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.muted,
     textAlign: 'center',
+  },
+  imagePreview: {
+    width: '100%',
+    height: 120,
+    borderRadius: 8,
+    backgroundColor: colors.paper,
+  },
+  imageActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  changeImageButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: colors.paper,
+  },
+  changeImageLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.accentDeep,
+  },
+  removeImageButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: colors.paper,
+  },
+  removeImageLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.spotlight,
   },
   infoBox: {
     backgroundColor: '#E8F1FB',
