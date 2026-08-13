@@ -1,6 +1,9 @@
 import type { KeywordReviewResult } from './keywordReview';
 
-export type HistoryKind = 'example_ai_chat' | 'keyword_review';
+export type HistoryKind =
+  | 'example_ai_chat'
+  | 'keyword_review'
+  | 'example_batch';
 
 export type HistoryChatMessage = {
   id: string;
@@ -15,7 +18,22 @@ export type ExampleAiChatDetail = {
 
 export type KeywordReviewDetail = KeywordReviewResult;
 
-export type HistoryDetail = ExampleAiChatDetail | KeywordReviewDetail;
+export type ExampleBatchResultItem = {
+  example_id: string;
+  title: string;
+  correct: boolean;
+};
+
+export type ExampleBatchDetail = {
+  total: number;
+  correct_count: number;
+  results: ExampleBatchResultItem[];
+};
+
+export type HistoryDetail =
+  | ExampleAiChatDetail
+  | KeywordReviewDetail
+  | ExampleBatchDetail;
 
 export type HistorySummary = {
   id: string;
@@ -48,5 +66,18 @@ export function isKeywordReviewDetail(
     detail != null &&
     'keyword' in detail &&
     'grade' in detail
+  );
+}
+
+export function isExampleBatchDetail(
+  detail: HistoryDetail | null,
+  kind: string,
+): detail is ExampleBatchDetail {
+  return (
+    kind === 'example_batch' &&
+    detail != null &&
+    'total' in detail &&
+    'correct_count' in detail &&
+    'results' in detail
   );
 }

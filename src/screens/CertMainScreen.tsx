@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { ExampleCreateModal } from '../components/ExampleCreateModal';
 import { ExampleSolveModal } from '../components/ExampleSolveModal';
-import { deleteExample, fetchExamples } from '../lib/examplesApi';
+import { deleteExample, fetchExamples, shuffleChoices } from '../lib/examplesApi';
 import { getErrorMessage } from '../lib/certificationsApi';
 import {
   exampleExists,
@@ -28,11 +28,13 @@ import { colors } from '../theme/colors';
 import type { Certification } from '../types/certification';
 import type { ExampleSummary } from '../types/example';
 import type {
+  ExampleBatchDetail,
   HistoryChatMessage,
   HistorySummary,
 } from '../types/history';
 import {
   isExampleAiChatDetail,
+  isExampleBatchDetail,
   isKeywordReviewDetail,
 } from '../types/history';
 import type { KeywordReviewResult, UnderstandingGrade } from '../types/keywordReview';
@@ -43,7 +45,7 @@ type Props = {
 };
 
 type SolveSession = {
-  exampleId: string;
+  exampleIds: string[];
   historyId: string | null;
   initialMessages: HistoryChatMessage[];
   resumeMode: boolean;
@@ -53,8 +55,17 @@ const MIN_QUESTION_COUNT = 10;
 const MAX_QUESTION_COUNT = 25;
 const DEFAULT_QUESTION_COUNT = 10;
 
-function clampQuestionCount(value: number) {
-  return Math.min(MAX_QUESTION_COUNT, Math.max(MIN_QUESTION_COUNT, value));
+function clampQuestionCount(value: number, available: number) {
+  const maxAllowed = Math.min(MAX_QUESTION_COUNT, Math.max(0, available));
+  if (maxAllowed <= 0) {
+    return DEFAULT_QUESTION_COUNT;
+  }
+  const minAllowed = Math.min(MIN_QUESTION_COUNT, maxAllowed);
+  return Math.min(maxAllowed, Math.max(minAllowed, value));
+}
+
+function pickRandomExampleIds(ids: string[], count: number): string[] {
+  return shuffleChoices(ids).slice(0, count);
 }
 
 function gradeAccent(grade: UnderstandingGrade): string {
@@ -93,6 +104,8 @@ export function CertMainScreen({ certification, onBack }: Props) {
   const [reviewBusy, setReviewBusy] = useState(false);
   const [keywordReviewResult, setKeywordReviewResult] =
     useState<KeywordReviewResult | null>(null);
+  const [batchHistoryDetail, setBatchHistoryDetail] =
+    useState<ExampleBatchDetail | null>(null);
 
   const loadExamples = useCallback(async () => {
     setExamplesLoading(true);
@@ -130,9 +143,75 @@ export function CertMainScreen({ certification, onBack }: Props) {
     void loadHistories();
   }, [loadHistories]);
 
+  const availableCount = examples.length;
+  const maxSelectableCount = Math.min(MAX_QUESTION_COUNT, availableCount);
+  const canStartBatch =
+    !examplesLoading && availableCount >= MIN_QUESTION_COUNT;
+
+  useEffect(() => {
+    if (examplesLoading) return;
+    if (maxSelectableCount <= 0) return;
+    setQuestionCountText((prev) => {
+      const parsed = Number(prev);
+      if (Number.isNaN(parsed)) {
+        return String(clampQuestionCount(DEFAULT_QUESTION_COUNT, availableCount));
+      }
+      if (parsed > maxSelectableCount || parsed < Math.min(MIN_QUESTION_COUNT, maxSelectableCount)) {
+        return String(clampQuestionCount(parsed, availableCount));
+      }
+      return prev;
+    });
+  }, [availableCount, examplesLoading, maxSelectableCount]);
+
   const openSolve = (exampleId: string) => {
     setSolveSession({
-      exampleId,
+      exampleIds: [exampleId],
+      historyId: null,
+      initialMessages: [],
+      resumeMode: false,
+    });
+  };
+
+  const openExampleFromBatchHistory = async (exampleId: string) => {
+    try {
+      const exists = await exampleExists(exampleId);
+      if (!exists) {
+        setNoticeMessage(
+          'この例題は削除されているため、開けません。',
+        );
+        return;
+      }
+      openSolve(exampleId);
+    } catch (error) {
+      setNoticeMessage(
+        getHistoryErrorMessage(error, '例題を開けませんでした。'),
+      );
+    }
+  };
+
+  const openBatchSolve = () => {
+    if (!canStartBatch) {
+      setNoticeMessage(
+        `まとめて解くには例題が${MIN_QUESTION_COUNT}問以上必要です（現在 ${availableCount} 問）。`,
+      );
+      return;
+    }
+    const parsed = Number(questionCountText);
+    const count = clampQuestionCount(
+      Number.isNaN(parsed) ? DEFAULT_QUESTION_COUNT : parsed,
+      availableCount,
+    );
+    setQuestionCountText(String(count));
+    const picked = pickRandomExampleIds(
+      examples.map((item) => item.id),
+      count,
+    );
+    if (picked.length === 0) {
+      setNoticeMessage('解ける例題がありません。');
+      return;
+    }
+    setSolveSession({
+      exampleIds: picked,
       historyId: null,
       initialMessages: [],
       resumeMode: false,
@@ -142,6 +221,11 @@ export function CertMainScreen({ certification, onBack }: Props) {
   const openHistoryDetail = async (item: HistorySummary) => {
     if (isKeywordReviewDetail(item.detail, item.kind)) {
       setKeywordReviewResult(item.detail);
+      return;
+    }
+
+    if (isExampleBatchDetail(item.detail, item.kind)) {
+      setBatchHistoryDetail(item.detail);
       return;
     }
 
@@ -159,7 +243,7 @@ export function CertMainScreen({ certification, onBack }: Props) {
         return;
       }
       setSolveSession({
-        exampleId: item.detail.example_id,
+        exampleIds: [item.detail.example_id],
         historyId: item.id,
         initialMessages: item.detail.messages,
         resumeMode: true,
@@ -201,7 +285,7 @@ export function CertMainScreen({ certification, onBack }: Props) {
     setDeleteBusy(true);
     try {
       await deleteExample(deleteTarget.id);
-      if (solveSession?.exampleId === deleteTarget.id) {
+      if (solveSession?.exampleIds.includes(deleteTarget.id)) {
         setSolveSession(null);
       }
       setDeleteTarget(null);
@@ -224,7 +308,6 @@ export function CertMainScreen({ certification, onBack }: Props) {
   const handleQuestionCountChange = (text: string) => {
     const digits = text.replace(/\D/g, '').slice(0, 2);
     if (!digits) {
-      // 空にはできないので、入力中は一旦空表示を避けて前回値を維持
       return;
     }
 
@@ -233,14 +316,27 @@ export function CertMainScreen({ certification, onBack }: Props) {
       return;
     }
 
-    // 2桁になった時点で 10〜25 以外は受け付けない
-    if (digits.length === 2 && (next < MIN_QUESTION_COUNT || next > MAX_QUESTION_COUNT)) {
+    const maxAllowed = Math.max(0, maxSelectableCount);
+    if (maxAllowed <= 0) {
       return;
     }
 
-    // 1桁は 1〜2 のみ（10〜25 を組み立てる途中）
-    if (digits.length === 1 && next !== 1 && next !== 2) {
+    if (next > maxAllowed) {
       return;
+    }
+
+    const minAllowed = Math.min(MIN_QUESTION_COUNT, maxAllowed);
+    if (digits.length === 2 && next < minAllowed) {
+      return;
+    }
+
+    if (digits.length === 1) {
+      if (maxAllowed < 10) {
+        if (next < 1 || next > maxAllowed) return;
+      } else {
+        if (next !== 1 && next !== 2) return;
+        if (next === 2 && maxAllowed < 20) return;
+      }
     }
 
     setQuestionCountText(digits);
@@ -249,8 +345,8 @@ export function CertMainScreen({ certification, onBack }: Props) {
   const handleQuestionCountBlur = () => {
     const parsed = Number(questionCountText);
     const next = Number.isNaN(parsed)
-      ? DEFAULT_QUESTION_COUNT
-      : clampQuestionCount(parsed);
+      ? clampQuestionCount(DEFAULT_QUESTION_COUNT, availableCount)
+      : clampQuestionCount(parsed, availableCount);
     setQuestionCountText(String(next));
   };
 
@@ -395,20 +491,37 @@ export function CertMainScreen({ certification, onBack }: Props) {
                 keyboardType="number-pad"
                 inputMode="numeric"
                 maxLength={2}
+                editable={maxSelectableCount > 0}
                 style={styles.questionCountInput}
                 accessibilityLabel="問題数"
               />
               <Text style={styles.questionCountUnit}>問</Text>
               <Pressable
                 accessibilityRole="button"
+                disabled={!canStartBatch}
+                onPress={openBatchSolve}
                 style={({ pressed }) => [
                   styles.solveButton,
-                  pressed && styles.solveButtonPressed,
+                  pressed && canStartBatch && styles.solveButtonPressed,
+                  !canStartBatch && styles.solveButtonDisabled,
                 ]}
               >
-                <Text style={styles.solveButtonLabel}>例題を解く</Text>
+                <Text
+                  style={[
+                    styles.solveButtonLabel,
+                    !canStartBatch && styles.solveButtonLabelDisabled,
+                  ]}
+                >
+                  例題を解く
+                </Text>
               </Pressable>
-              <Text style={styles.questionCountHint}>※10〜25問のみ入力可</Text>
+              <Text style={styles.questionCountHint}>
+                {availableCount === 0
+                  ? '※例題がありません'
+                  : availableCount < MIN_QUESTION_COUNT
+                    ? `※まとめて解くには${MIN_QUESTION_COUNT}問以上必要（現在${availableCount}問）`
+                    : `※${MIN_QUESTION_COUNT}〜${maxSelectableCount}問のみ入力可`}
+              </Text>
             </View>
 
             <ScrollView
@@ -535,19 +648,6 @@ export function CertMainScreen({ certification, onBack }: Props) {
         onClose={() => setIsCreateOpen(false)}
         onGenerated={() => {
           void loadExamples();
-        }}
-      />
-
-      <ExampleSolveModal
-        visible={solveSession != null}
-        exampleId={solveSession?.exampleId ?? null}
-        certificationId={certification.id}
-        historyId={solveSession?.historyId ?? null}
-        initialMessages={solveSession?.initialMessages ?? []}
-        resumeMode={solveSession?.resumeMode ?? false}
-        onClose={() => setSolveSession(null)}
-        onHistoryChanged={() => {
-          void loadHistories();
         }}
       />
 
@@ -686,6 +786,114 @@ export function CertMainScreen({ certification, onBack }: Props) {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={batchHistoryDetail != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBatchHistoryDetail(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setBatchHistoryDetail(null)}
+          />
+          <View
+            style={[
+              styles.modalCard,
+              styles.reviewResultCard,
+              isWide && styles.modalCardWide,
+            ]}
+          >
+            <Text style={styles.modalTitle}>まとめて解いた結果</Text>
+            {batchHistoryDetail ? (
+              <ScrollView
+                style={styles.reviewResultScroll}
+                contentContainerStyle={styles.reviewResultContent}
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={styles.batchResultScore}>
+                  {batchHistoryDetail.total}問中{' '}
+                  {batchHistoryDetail.correct_count}問正解
+                </Text>
+                <Text style={styles.batchResultRate}>
+                  正答率{' '}
+                  {batchHistoryDetail.total > 0
+                    ? Math.round(
+                        (batchHistoryDetail.correct_count /
+                          batchHistoryDetail.total) *
+                          100,
+                      )
+                    : 0}
+                  %
+                </Text>
+                {batchHistoryDetail.results.map((item, index) => (
+                  <View key={`${item.example_id}-${index}`} style={styles.batchResultRow}>
+                    <View style={styles.batchResultMain}>
+                      <Text style={styles.batchResultIndex}>第{index + 1}問</Text>
+                      <Text style={styles.batchResultTitle} numberOfLines={2}>
+                        {item.title}
+                      </Text>
+                      <View style={styles.batchResultMeta}>
+                        <Text
+                          style={[
+                            styles.batchResultVerdict,
+                            item.correct
+                              ? styles.batchResultCorrect
+                              : styles.batchResultWrong,
+                          ]}
+                        >
+                          {item.correct ? '正解' : '不正解'}
+                        </Text>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${item.title}を開く`}
+                          onPress={() => {
+                            void openExampleFromBatchHistory(item.example_id);
+                          }}
+                          style={({ pressed }) => [
+                            styles.batchOpenButton,
+                            pressed && styles.batchOpenButtonPressed,
+                          ]}
+                        >
+                          <Text style={styles.batchOpenButtonLabel}>
+                            この問題を開く
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : null}
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setBatchHistoryDetail(null)}
+                style={({ pressed }) => [
+                  styles.modalPrimaryButton,
+                  pressed && styles.modalPrimaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.modalPrimaryButtonLabel}>閉じる</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <ExampleSolveModal
+        visible={solveSession != null}
+        exampleIds={solveSession?.exampleIds ?? []}
+        certificationId={certification.id}
+        historyId={solveSession?.historyId ?? null}
+        initialMessages={solveSession?.initialMessages ?? []}
+        resumeMode={solveSession?.resumeMode ?? false}
+        onClose={() => setSolveSession(null)}
+        onHistoryChanged={() => {
+          void loadHistories();
+        }}
+      />
 
       <Modal
         visible={noticeMessage != null}
@@ -956,10 +1164,16 @@ const styles = StyleSheet.create({
   solveButtonPressed: {
     backgroundColor: colors.accentDeep,
   },
+  solveButtonDisabled: {
+    backgroundColor: colors.line,
+  },
   solveButtonLabel: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 13,
     color: colors.paper,
+  },
+  solveButtonLabelDisabled: {
+    color: colors.muted,
   },
   questionCountHint: {
     fontFamily: 'NotoSansJP_400Regular',
@@ -1218,6 +1432,74 @@ const styles = StyleSheet.create({
     backgroundColor: colors.mist,
     borderRadius: 10,
     padding: 12,
+  },
+  batchResultScore: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 24,
+    color: colors.ink,
+    marginBottom: 4,
+  },
+  batchResultRate: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 15,
+    color: colors.accentDeep,
+    marginBottom: 16,
+  },
+  batchResultRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  batchResultMain: {
+    flex: 1,
+    gap: 6,
+  },
+  batchResultIndex: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.muted,
+  },
+  batchResultTitle: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    color: colors.inkSoft,
+  },
+  batchResultMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 2,
+  },
+  batchResultVerdict: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+  },
+  batchResultCorrect: {
+    color: colors.accentDeep,
+  },
+  batchResultWrong: {
+    color: colors.spotlight,
+  },
+  batchOpenButton: {
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  batchOpenButtonPressed: {
+    backgroundColor: colors.accent,
+  },
+  batchOpenButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.accentDeep,
   },
   modalOverlay: {
     flex: 1,

@@ -24,6 +24,7 @@ import {
 import { downloadDiagramPdf } from '../lib/diagramPdf';
 import {
   insertAiChatHistory,
+  insertExampleBatchHistory,
   updateAiChatHistory,
 } from '../lib/historiesApi';
 import { colors } from '../theme/colors';
@@ -32,11 +33,15 @@ import {
   type ExampleDetail,
   type SelectAnswer,
 } from '../types/example';
-import type { HistoryChatMessage } from '../types/history';
+import type {
+  ExampleBatchResultItem,
+  HistoryChatMessage,
+} from '../types/history';
 
 type Props = {
   visible: boolean;
-  exampleId: string | null;
+  /** 1件以上。連続解答時は複数 */
+  exampleIds: string[];
   certificationId: string;
   historyId?: string | null;
   initialMessages?: HistoryChatMessage[];
@@ -55,7 +60,7 @@ function toChoiceLabel(index: number) {
 
 export function ExampleSolveModal({
   visible,
-  exampleId,
+  exampleIds,
   certificationId,
   historyId = null,
   initialMessages = [],
@@ -65,6 +70,7 @@ export function ExampleSolveModal({
 }: Props) {
   const { width } = useWindowDimensions();
   const isWide = width >= 720;
+  const [queueIndex, setQueueIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [example, setExample] = useState<ExampleDetail | null>(null);
@@ -80,6 +86,11 @@ export function ExampleSolveModal({
   const [closingBusy, setClosingBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+  const [batchResults, setBatchResults] = useState<
+    Array<ExampleBatchResultItem | null>
+  >([]);
+  const [showBatchSummary, setShowBatchSummary] = useState(false);
+  const [batchHistorySaved, setBatchHistorySaved] = useState(false);
 
   const initialMessagesRef = useRef(initialMessages);
   initialMessagesRef.current = initialMessages;
@@ -87,6 +98,26 @@ export function ExampleSolveModal({
   resumeModeRef.current = resumeMode;
   const historyIdRef = useRef(historyId);
   historyIdRef.current = historyId;
+
+  const exampleId = exampleIds[queueIndex] ?? null;
+  const queueTotal = exampleIds.length;
+  const hasNext = !resumeMode && queueIndex < queueTotal - 1;
+  const isBatch = !resumeMode && queueTotal > 1;
+  const isLastInBatch = isBatch && !hasNext;
+
+  useEffect(() => {
+    if (!visible) {
+      setQueueIndex(0);
+      setBatchResults([]);
+      setShowBatchSummary(false);
+      setBatchHistorySaved(false);
+      return;
+    }
+    setQueueIndex(0);
+    setBatchResults(Array.from({ length: exampleIds.length }, () => null));
+    setShowBatchSummary(false);
+    setBatchHistorySaved(false);
+  }, [visible, exampleIds.join('|')]);
 
   useEffect(() => {
     if (!visible || !exampleId) {
@@ -118,12 +149,13 @@ export function ExampleSolveModal({
     setDiagramBusy(false);
     setClosingBusy(false);
     setNotice(null);
-    setActiveHistoryId(historyIdRef.current);
 
-    const shouldResume = resumeModeRef.current;
+    const isFirstInSession = queueIndex === 0;
+    const shouldResume = isFirstInSession && resumeModeRef.current;
     setRevealed(shouldResume);
     setChatOpen(shouldResume);
     setChatMessages(shouldResume ? [...initialMessagesRef.current] : []);
+    setActiveHistoryId(shouldResume ? historyIdRef.current : null);
 
     void (async () => {
       try {
@@ -152,7 +184,7 @@ export function ExampleSolveModal({
     return () => {
       cancelled = true;
     };
-  }, [visible, exampleId]);
+  }, [visible, exampleId, queueIndex]);
 
   const isSelect = example ? isSelectExample(example) : false;
   const correctCount = useMemo(
@@ -185,9 +217,59 @@ export function ExampleSolveModal({
     ? selectedIds.length > 0
     : descriptiveDraft.trim().length > 0;
 
+  const evaluateCurrentAnswer = (): boolean => {
+    if (!example) return false;
+    if (isSelect) {
+      const correctIds = choices.filter((c) => c.isAnswer).map((c) => c.id);
+      if (selectedIds.length !== correctIds.length) return false;
+      const selectedSet = new Set(selectedIds);
+      return correctIds.every((id) => selectedSet.has(id));
+    }
+    return (
+      descriptiveDraft.trim().replace(/\s+/g, '') ===
+      example.answer.trim().replace(/\s+/g, '')
+    );
+  };
+
   const handleCheck = () => {
-    if (!canCheck) return;
+    if (!canCheck || !example || !exampleId) return;
+    if (isBatch) {
+      const correct = evaluateCurrentAnswer();
+      setBatchResults((prev) => {
+        const next = [...prev];
+        next[queueIndex] = {
+          example_id: exampleId,
+          title: example.title || '無題の例題',
+          correct,
+        };
+        return next;
+      });
+    }
     setRevealed(true);
+  };
+
+  const batchCorrectCount = useMemo(
+    () => batchResults.filter((item) => item?.correct === true).length,
+    [batchResults],
+  );
+
+  const completedBatchResults = useMemo(() => {
+    if (!isBatch) return [];
+    if (batchResults.length !== queueTotal) return [];
+    if (batchResults.some((item) => item == null)) return [];
+    return batchResults as ExampleBatchResultItem[];
+  }, [batchResults, isBatch, queueTotal]);
+
+  const persistBatchHistoryIfNeeded = async () => {
+    if (!isBatch || batchHistorySaved || completedBatchResults.length === 0) {
+      return;
+    }
+    await insertExampleBatchHistory({
+      certificationId,
+      results: completedBatchResults,
+    });
+    setBatchHistorySaved(true);
+    onHistoryChanged?.();
   };
 
   const persistHistoryIfNeeded = async () => {
@@ -220,6 +302,7 @@ export function ExampleSolveModal({
       setClosingBusy(true);
       try {
         await persistHistoryIfNeeded();
+        await persistBatchHistoryIfNeeded();
       } catch (err) {
         console.error('[solve] persist history', err);
         setNotice(
@@ -230,6 +313,46 @@ export function ExampleSolveModal({
       }
       setClosingBusy(false);
       onClose();
+    })();
+  };
+
+  const handleNextQuestion = () => {
+    if (!hasNext || chatSending || diagramBusy || closingBusy) return;
+    void (async () => {
+      setClosingBusy(true);
+      try {
+        await persistHistoryIfNeeded();
+      } catch (err) {
+        console.error('[solve] persist history before next', err);
+        setNotice(
+          getExampleErrorMessage(err, '実施履歴の保存に失敗しました。'),
+        );
+        setClosingBusy(false);
+        return;
+      }
+      setClosingBusy(false);
+      setQueueIndex((prev) => prev + 1);
+    })();
+  };
+
+  const handleShowBatchSummary = () => {
+    if (!isLastInBatch || chatSending || diagramBusy || closingBusy) return;
+    void (async () => {
+      setClosingBusy(true);
+      try {
+        await persistHistoryIfNeeded();
+        await persistBatchHistoryIfNeeded();
+      } catch (err) {
+        console.error('[solve] persist history before summary', err);
+        setNotice(
+          getExampleErrorMessage(err, '実施履歴の保存に失敗しました。'),
+        );
+        setClosingBusy(false);
+        return;
+      }
+      setClosingBusy(false);
+      setChatOpen(false);
+      setShowBatchSummary(true);
     })();
   };
 
@@ -359,6 +482,7 @@ export function ExampleSolveModal({
                 <View
                   style={[
                     styles.choiceMark,
+                    isMultiple && styles.choiceMarkCheckbox,
                     selected && styles.choiceMarkSelected,
                     showCorrect && styles.choiceMarkCorrect,
                   ]}
@@ -598,7 +722,7 @@ export function ExampleSolveModal({
         <View
           style={[
             styles.card,
-            (revealed || chatOpen) && styles.cardTall,
+            (revealed || chatOpen || showBatchSummary) && styles.cardTall,
             chatOpen
               ? isWide
                 ? styles.cardExpandedWide
@@ -609,7 +733,13 @@ export function ExampleSolveModal({
           ]}
         >
           <View style={styles.header}>
-            <Text style={styles.title}>例題を解く</Text>
+            <Text style={styles.title}>
+              {showBatchSummary
+                ? '解答結果'
+                : isBatch
+                  ? `例題を解く（${queueIndex + 1}/${queueTotal}）`
+                  : '例題を解く'}
+            </Text>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="閉じる"
@@ -633,6 +763,46 @@ export function ExampleSolveModal({
           ) : error ? (
             <View style={styles.centerBox}>
               <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : showBatchSummary ? (
+            <View style={styles.summaryBox}>
+              <Text style={styles.summaryLead}>全問の解答が終わりました</Text>
+              <Text style={styles.summaryScore}>
+                {queueTotal}問中 {batchCorrectCount}問正解
+              </Text>
+              <Text style={styles.summaryRate}>
+                正答率{' '}
+                {queueTotal > 0
+                  ? Math.round((batchCorrectCount / queueTotal) * 100)
+                  : 0}
+                %
+              </Text>
+              <ScrollView
+                style={styles.summaryList}
+                contentContainerStyle={styles.summaryListContent}
+                showsVerticalScrollIndicator
+              >
+                {batchResults.map((result, index) => (
+                  <View key={`result-${index}`} style={styles.summaryRow}>
+                    <View style={styles.summaryRowMain}>
+                      <Text style={styles.summaryRowLabel}>第{index + 1}問</Text>
+                      <Text style={styles.summaryRowTitle} numberOfLines={1}>
+                        {result?.title || '—'}
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.summaryRowValue,
+                        result?.correct
+                          ? styles.summaryRowCorrect
+                          : styles.summaryRowWrong,
+                      ]}
+                    >
+                      {result?.correct ? '正解' : '不正解'}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
             </View>
           ) : example ? (
             <View
@@ -682,7 +852,7 @@ export function ExampleSolveModal({
             </View>
           ) : null}
 
-          {!revealed && example && !loading && !error ? (
+          {!showBatchSummary && !revealed && example && !loading && !error ? (
             <View style={styles.footer}>
               <Pressable
                 accessibilityRole="button"
@@ -701,6 +871,88 @@ export function ExampleSolveModal({
                   ]}
                 >
                   答え合わせ
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {!showBatchSummary &&
+          revealed &&
+          hasNext &&
+          example &&
+          !loading &&
+          !error ? (
+            <View style={styles.footer}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={closeLocked}
+                onPress={handleNextQuestion}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && !closeLocked && styles.primaryButtonPressed,
+                  closeLocked && styles.primaryButtonDisabled,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.primaryButtonLabel,
+                    closeLocked && styles.primaryButtonLabelDisabled,
+                  ]}
+                >
+                  次の問題へ（{queueIndex + 2}/{queueTotal}）
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {!showBatchSummary &&
+          revealed &&
+          isLastInBatch &&
+          example &&
+          !loading &&
+          !error ? (
+            <View style={styles.footer}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={closeLocked}
+                onPress={handleShowBatchSummary}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && !closeLocked && styles.primaryButtonPressed,
+                  closeLocked && styles.primaryButtonDisabled,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.primaryButtonLabel,
+                    closeLocked && styles.primaryButtonLabelDisabled,
+                  ]}
+                >
+                  結果を見る
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {showBatchSummary ? (
+            <View style={styles.footer}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={closeLocked}
+                onPress={handleClose}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && !closeLocked && styles.primaryButtonPressed,
+                  closeLocked && styles.primaryButtonDisabled,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.primaryButtonLabel,
+                    closeLocked && styles.primaryButtonLabelDisabled,
+                  ]}
+                >
+                  閉じる
                 </Text>
               </Pressable>
             </View>
@@ -869,6 +1121,74 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.inkSoft,
   },
+  summaryBox: {
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    alignItems: 'center',
+    gap: 10,
+  },
+  summaryLead: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 14,
+    color: colors.inkSoft,
+  },
+  summaryScore: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 28,
+    color: colors.ink,
+    marginTop: 4,
+  },
+  summaryRate: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 16,
+    color: colors.accentDeep,
+    marginBottom: 8,
+  },
+  summaryList: {
+    alignSelf: 'stretch',
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    maxHeight: 280,
+  },
+  summaryListContent: {
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  summaryRowMain: {
+    flex: 1,
+    gap: 2,
+  },
+  summaryRowLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.muted,
+  },
+  summaryRowTitle: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    color: colors.inkSoft,
+  },
+  summaryRowValue: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+  },
+  summaryRowCorrect: {
+    color: colors.accentDeep,
+  },
+  summaryRowWrong: {
+    color: colors.spotlight,
+  },
   errorText: {
     fontFamily: 'NotoSansJP_400Regular',
     fontSize: 14,
@@ -967,6 +1287,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 1,
     backgroundColor: colors.paper,
+  },
+  choiceMarkCheckbox: {
+    borderRadius: 4,
   },
   choiceMarkSelected: {
     borderColor: colors.accent,
