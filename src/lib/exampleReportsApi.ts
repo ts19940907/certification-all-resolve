@@ -7,7 +7,7 @@ import type {
 
 type ReportRow = {
   id: string;
-  example_id: string;
+  example_id: string | null;
   example_title: string;
   certification_id: string | null;
   certification_name: string;
@@ -110,6 +110,45 @@ export async function submitExampleContentReport(args: {
   }
 
   // 管理者へのメール通知は追加費用なしの手段が整い次第、ここで Edge Function 等に接続する予定
+}
+
+export async function submitMasterChangeReport(args: {
+  certificationId: string;
+  certificationName: string;
+  target: 'category_master' | 'keyword_master';
+  message: string;
+}): Promise<void> {
+  const message = args.message.trim();
+  if (!message) {
+    throw new Error('連絡内容を入力してください。');
+  }
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError || !user) {
+    throw new Error('ログインが必要です。');
+  }
+
+  const { error } = await supabase.from('example_content_reports').insert({
+    example_id: null,
+    example_title:
+      args.target === 'category_master'
+        ? 'カテゴリマスタの変更依頼'
+        : 'キーワードマスタの変更依頼',
+    certification_id: args.certificationId,
+    certification_name: args.certificationName.trim(),
+    reporter_user_id: user.id,
+    target: args.target,
+    message,
+    status: 'open',
+  });
+
+  if (error) {
+    console.error('[reports] master insert', error);
+    throw error;
+  }
 }
 
 export async function fetchExampleContentReports(): Promise<

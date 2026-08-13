@@ -1,0 +1,4 @@
+{
+  "name": "seed-cert-analysis",
+  "verify_jwt": true
+}

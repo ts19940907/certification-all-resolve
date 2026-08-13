@@ -13,7 +13,15 @@ import {
 import { ExampleCreateModal } from '../components/ExampleCreateModal';
 import { ExampleReportModal } from '../components/ExampleReportModal';
 import { ExampleSolveModal } from '../components/ExampleSolveModal';
+import { AnalysisModal } from '../components/AnalysisModal';
+import { CategoryMasterModal } from '../components/CategoryMasterModal';
+import { CategoryRadarChart } from '../components/CategoryRadarChart';
 import { NotificationBell } from '../components/NotificationBell';
+import {
+  buildSessionCategoryAnalysis,
+  fetchCertificationCategories,
+  fetchExampleCategoryMap,
+} from '../lib/analysisApi';
 import { deleteExample, fetchExamples, shuffleChoices } from '../lib/examplesApi';
 import { getErrorMessage } from '../lib/certificationsApi';
 import {
@@ -27,6 +35,10 @@ import {
   reviewKeyword,
 } from '../lib/keywordReviewApi';
 import { colors } from '../theme/colors';
+import type {
+  CategoryUnderstanding,
+  CertificationCategory,
+} from '../types/analysis';
 import type { Certification } from '../types/certification';
 import type { ExampleSummary } from '../types/example';
 import type {
@@ -123,13 +135,26 @@ export function CertMainScreen({
   const [batchHistoryDetail, setBatchHistoryDetail] =
     useState<ExampleBatchDetail | null>(null);
   const [reportTarget, setReportTarget] = useState<ExampleSummary | null>(null);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [categoryMasterOpen, setCategoryMasterOpen] = useState(false);
+  const [categories, setCategories] = useState<CertificationCategory[]>([]);
+  const [filterDraft, setFilterDraft] = useState<string>('all');
+  const [filterApplied, setFilterApplied] = useState<string>('all');
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [sessionCategoryStats, setSessionCategoryStats] = useState<
+    CategoryUnderstanding[]
+  >([]);
 
   const loadExamples = useCallback(async () => {
     setExamplesLoading(true);
     setExamplesError(null);
     try {
-      const rows = await fetchExamples(certification.id);
+      const [rows, cats] = await Promise.all([
+        fetchExamples(certification.id),
+        fetchCertificationCategories(certification.id),
+      ]);
       setExamples(rows);
+      setCategories(cats);
     } catch (error) {
       setExamplesError(getErrorMessage(error, '例題一覧の取得に失敗しました'));
     } finally {
@@ -172,6 +197,20 @@ export function CertMainScreen({
   };
 
   const availableCount = examples.length;
+  const filteredExamples =
+    filterApplied === 'all'
+      ? examples
+      : filterApplied === 'uncategorized'
+        ? examples.filter((item) => item.categoryId == null)
+        : examples.filter((item) => item.categoryId === filterApplied);
+
+  const filterLabel =
+    filterApplied === 'all'
+      ? 'すべて'
+      : filterApplied === 'uncategorized'
+        ? '未分類'
+        : categories.find((c) => c.id === filterApplied)?.name ?? 'カテゴリ';
+
   const maxSelectableCount = Math.min(MAX_QUESTION_COUNT, availableCount);
   const canStartBatch =
     !examplesLoading && availableCount >= MIN_QUESTION_COUNT;
@@ -283,6 +322,18 @@ export function CertMainScreen({
 
     if (isExampleBatchDetail(item.detail, item.kind)) {
       setBatchHistoryDetail(item.detail);
+      setSessionCategoryStats([]);
+      try {
+        const [cats, map] = await Promise.all([
+          fetchCertificationCategories(certification.id),
+          fetchExampleCategoryMap(certification.id),
+        ]);
+        setSessionCategoryStats(
+          buildSessionCategoryAnalysis(cats, item.detail, map),
+        );
+      } catch (error) {
+        console.error('[CertMainScreen] session analysis', error);
+      }
       return;
     }
 
@@ -429,6 +480,16 @@ export function CertMainScreen({
             </View>
             <View style={styles.headerTitleSpacer} />
             <View style={[styles.headerSide, styles.headerSideRight]}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setAnalysisOpen(true)}
+                style={({ pressed }) => [
+                  styles.analysisButton,
+                  pressed && styles.analysisButtonPressed,
+                ]}
+              >
+                <Text style={styles.analysisButtonLabel}>分析</Text>
+              </Pressable>
               {onOpenFromNotification ? (
                 <NotificationBell onOpenExample={onOpenFromNotification} />
               ) : null}
@@ -459,6 +520,16 @@ export function CertMainScreen({
               </Text>
             </View>
             <View style={styles.headerSideRightStacked}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setAnalysisOpen(true)}
+                style={({ pressed }) => [
+                  styles.analysisButton,
+                  pressed && styles.analysisButtonPressed,
+                ]}
+              >
+                <Text style={styles.analysisButtonLabel}>分析</Text>
+              </Pressable>
               {onOpenFromNotification ? (
                 <NotificationBell onOpenExample={onOpenFromNotification} />
               ) : null}
@@ -587,6 +658,73 @@ export function CertMainScreen({
               </Text>
             </View>
 
+            <View style={styles.filterRow}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setFilterMenuOpen((v) => !v)}
+                style={({ pressed }) => [
+                  styles.filterCombo,
+                  pressed && styles.filterComboPressed,
+                ]}
+              >
+                <Text style={styles.filterComboLabel} numberOfLines={1}>
+                  {filterDraft === 'all'
+                    ? 'すべて'
+                    : filterDraft === 'uncategorized'
+                      ? '未分類'
+                      : categories.find((c) => c.id === filterDraft)?.name ??
+                        'カテゴリ'}
+                </Text>
+                <Text style={styles.filterComboCaret}>▼</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setFilterApplied(filterDraft);
+                  setFilterMenuOpen(false);
+                }}
+                style={({ pressed }) => [
+                  styles.filterButton,
+                  pressed && styles.filterButtonPressed,
+                ]}
+              >
+                <Text style={styles.filterButtonLabel}>フィルター</Text>
+              </Pressable>
+              <Text style={styles.filterHint}>
+                表示中 {filteredExamples.length} / {examples.length}（{filterLabel}）
+              </Text>
+            </View>
+            {filterMenuOpen ? (
+              <View style={styles.filterMenu}>
+                {(
+                  [
+                    { id: 'all', name: 'すべて' },
+                    { id: 'uncategorized', name: '未分類' },
+                    ...categories.map((c) => ({ id: c.id, name: c.name })),
+                  ] as Array<{ id: string; name: string }>
+                ).map((opt) => (
+                  <Pressable
+                    key={opt.id}
+                    accessibilityRole="button"
+                    onPress={() => setFilterDraft(opt.id)}
+                    style={[
+                      styles.filterOption,
+                      filterDraft === opt.id && styles.filterOptionActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.filterOptionLabel,
+                        filterDraft === opt.id && styles.filterOptionLabelActive,
+                      ]}
+                    >
+                      {opt.name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+
             <ScrollView
               style={styles.panelScroll}
               contentContainerStyle={styles.panelScrollContent}
@@ -600,12 +738,34 @@ export function CertMainScreen({
                 <Text style={styles.panelLead}>
                   まだ例題がありません。「＋例題を新規作成」から追加できます。
                 </Text>
+              ) : filteredExamples.length === 0 ? (
+                <Text style={styles.panelLead}>
+                  条件に一致する例題がありません。フィルターを変更してください。
+                </Text>
               ) : (
-                examples.map((example) => (
+                filteredExamples.map((example) => (
                   <View key={example.id} style={styles.exampleRow}>
-                    <Text style={styles.exampleTitle} numberOfLines={2}>
-                      {example.title}
-                    </Text>
+                    <View style={styles.exampleTitleBlock}>
+                      <Text style={styles.exampleTitle} numberOfLines={2}>
+                        {example.title}
+                      </Text>
+                      {example.categoryName ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => setCategoryMasterOpen(true)}
+                          style={({ pressed }) => [
+                            styles.categoryTag,
+                            pressed && styles.categoryTagPressed,
+                          ]}
+                        >
+                          <Text style={styles.categoryTagLabel}>
+                            {example.categoryName}
+                          </Text>
+                        </Pressable>
+                      ) : (
+                        <Text style={styles.uncategorizedLabel}>未分類</Text>
+                      )}
+                    </View>
                     <View style={styles.exampleActions}>
                       <Pressable
                         accessibilityRole="button"
@@ -903,6 +1063,17 @@ export function CertMainScreen({
                     : 0}
                   %
                 </Text>
+                {sessionCategoryStats.length > 0 ? (
+                  <View style={styles.sessionAnalysisBlock}>
+                    <Text style={styles.sessionAnalysisTitle}>
+                      この回のカテゴリ理解度
+                    </Text>
+                    <CategoryRadarChart
+                      categories={sessionCategoryStats}
+                      size={240}
+                    />
+                  </View>
+                ) : null}
                 {batchHistoryDetail.results.map((item, index) => (
                   <View key={`${item.example_id}-${index}`} style={styles.batchResultRow}>
                     <View style={styles.batchResultMain}>
@@ -945,7 +1116,10 @@ export function CertMainScreen({
             <View style={styles.modalActions}>
               <Pressable
                 accessibilityRole="button"
-                onPress={() => setBatchHistoryDetail(null)}
+                onPress={() => {
+                  setBatchHistoryDetail(null);
+                  setSessionCategoryStats([]);
+                }}
                 style={({ pressed }) => [
                   styles.modalPrimaryButton,
                   pressed && styles.modalPrimaryButtonPressed,
@@ -957,6 +1131,22 @@ export function CertMainScreen({
           </View>
         </View>
       </Modal>
+
+      <AnalysisModal
+        visible={analysisOpen}
+        certificationId={certification.id}
+        certificationName={certification.name}
+        onClose={() => setAnalysisOpen(false)}
+        onOpenCategoryMaster={() => {
+          setCategoryMasterOpen(true);
+        }}
+      />
+
+      <CategoryMasterModal
+        visible={categoryMasterOpen}
+        certificationId={certification.id}
+        onClose={() => setCategoryMasterOpen(false)}
+      />
 
       <ExampleSolveModal
         visible={solveSession != null}
@@ -1120,6 +1310,143 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 14,
     color: colors.paper,
+  },
+  analysisButton: {
+    minHeight: 42,
+    borderRadius: 12,
+    backgroundColor: colors.accentSoft,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  analysisButtonPressed: {
+    backgroundColor: colors.accent,
+  },
+  analysisButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.accentDeep,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  filterCombo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 140,
+    maxWidth: 220,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  filterComboPressed: {
+    backgroundColor: colors.accentSoft,
+  },
+  filterComboLabel: {
+    flex: 1,
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    color: colors.ink,
+  },
+  filterComboCaret: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 10,
+    color: colors.muted,
+  },
+  filterButton: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.accentSoft,
+    borderWidth: 1,
+    borderColor: colors.accent,
+  },
+  filterButtonPressed: {
+    backgroundColor: colors.accent,
+  },
+  filterButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.accentDeep,
+  },
+  filterHint: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 12,
+    color: colors.muted,
+  },
+  filterMenu: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  filterOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  filterOptionActive: {
+    backgroundColor: colors.accentSoft,
+  },
+  filterOptionLabel: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    color: colors.inkSoft,
+  },
+  filterOptionLabelActive: {
+    fontFamily: 'NotoSansJP_700Bold',
+    color: colors.accentDeep,
+  },
+  exampleTitleBlock: {
+    flex: 1,
+    gap: 6,
+    minWidth: 0,
+  },
+  categoryTag: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  categoryTagPressed: {
+    backgroundColor: colors.accent,
+  },
+  categoryTagLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 11,
+    color: colors.accentDeep,
+  },
+  uncategorizedLabel: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 11,
+    color: colors.muted,
+  },
+  sessionAnalysisBlock: {
+    marginTop: 8,
+    marginBottom: 12,
+    gap: 6,
+  },
+  sessionAnalysisTitle: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.ink,
   },
   body: {
     flex: 1,

@@ -23,6 +23,7 @@ import {
   validateCertificationQuery,
   type ValidatedCertificationCandidate,
 } from '../lib/certificationsApi';
+import { ensureCertificationMasters } from '../lib/analysisApi';
 import { colors } from '../theme/colors';
 import type { Certification } from '../types/certification';
 
@@ -188,6 +189,11 @@ export function CertSelectScreen({ onSelect }: Props) {
         choiceMax: confirmCandidate.choiceMax,
         answerMax: confirmCandidate.answerMax,
       });
+      try {
+        await ensureCertificationMasters(created.id);
+      } catch (masterError) {
+        console.error('[CertSelectScreen] ensure masters', masterError);
+      }
       await loadCertifications();
       setListTab('active');
       setSelectedId(created.id);

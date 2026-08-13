@@ -449,6 +449,10 @@ export function ExampleSolveModal({
         <Text style={styles.exampleTitle}>{example.title}</Text>
       ) : null}
 
+      <Text style={styles.categoryLabel}>
+        カテゴリ: {example.categoryName?.trim() || '未分類'}
+      </Text>
+
       <Text style={styles.questionText}>Q. {example.question}</Text>
 
       {example.questionImageUrls.length > 0 ? (
@@ -1321,6 +1325,12 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 14,
     color: colors.inkSoft,
+    marginBottom: 6,
+  },
+  categoryLabel: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 12,
+    color: colors.muted,
     marginBottom: 10,
   },
   questionText: {

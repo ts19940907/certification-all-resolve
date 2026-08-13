@@ -2,13 +2,15 @@ export type ReportTarget =
   | 'question'
   | 'choices'
   | 'explanation'
-  | 'other';
+  | 'other'
+  | 'category_master'
+  | 'keyword_master';
 
 export type ReportStatus = 'open' | 'resolved';
 
 export type ExampleContentReport = {
   id: string;
-  exampleId: string;
+  exampleId: string | null;
   exampleTitle: string;
   certificationId: string | null;
   certificationName: string;
@@ -32,5 +34,9 @@ export function reportTargetLabel(target: ReportTarget): string {
       return '解説';
     case 'other':
       return 'その他';
+    case 'category_master':
+      return 'カテゴリマスタ';
+    case 'keyword_master':
+      return 'キーワードマスタ';
   }
 }

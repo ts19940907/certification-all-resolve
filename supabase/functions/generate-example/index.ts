@@ -24,6 +24,7 @@ type ExampleDraft = {
   explanation: string;
   choices: ChoiceDraft[];
   image_brief: string;
+  category_name: string;
 };
 
 type CertRow = {
@@ -157,6 +158,7 @@ function normalizeDraft(raw: unknown): ExampleDraft {
     explanation: String(obj.explanation ?? '').trim(),
     choices: choices.filter((c) => c.value.length > 0),
     image_brief: String(obj.image_brief ?? '').trim(),
+    category_name: String(obj.category_name ?? '').trim(),
   };
 }
 
@@ -394,6 +396,7 @@ function buildGeneratePrompt(args: {
   referenceFacts: string | null;
   imageMode: 'none' | 'use_attached' | 'needs_redraw';
   imageJudgeReason: string | null;
+  categoryNames: string[];
 }): string {
   const { cert, format, existing } = args;
   const existingBlock =
@@ -476,6 +479,13 @@ ${conditionBlock}
 既存例題:
 ${existingBlock}
 
+カテゴリ（必ず1つ、次のいずれかの名称を category_name にそのまま書く）:
+${
+  args.categoryNames.length === 0
+    ? '（マスタ未整備のため category_name は空文字）'
+    : args.categoryNames.map((n) => `- ${n}`).join('\n')
+}
+
 出力は次のJSONオブジェクトのみ（前後に説明文を付けない）:
 {
   "title": "短いタイトル",
@@ -483,6 +493,7 @@ ${existingBlock}
   "answer": "記述式なら模範解答。選択式なら空文字",
   "explanation": "次に活かせる考え方",
   "image_brief": "問題図の要約。不要なら空文字",
+  "category_name": "上記カテゴリのいずれか",
   "choices": [
     { "value": "選択肢本文", "is_answer": false, "reason": "正誤の理由" }
   ]
@@ -494,6 +505,7 @@ function buildReviewPrompt(args: {
   format: QuestionFormatBit;
   draft: ExampleDraft;
   existing: Array<{ title: string; question: string }>;
+  categoryNames: string[];
 }): string {
   const { certName, format, draft, existing } = args;
   return `あなたは資格試験「${certName}」の例題査読者です。
@@ -504,6 +516,12 @@ function buildReviewPrompt(args: {
 - explanation は次に活かせる考え方。各 choice.reason は正誤理由
 - 解説や reason で「選択肢A」など記号参照を使わず、文言で指す
 - image_brief は問題図の要約。図が不要なら空文字
+- category_name は次のいずれか（マスタが空なら空文字）:
+${
+  args.categoryNames.length === 0
+    ? '（なし）'
+    : args.categoryNames.map((n) => `- ${n}`).join('\n')
+}
 
 既存例題（重複回避の参考）:
 ${
@@ -516,6 +534,23 @@ ${
 ${JSON.stringify(draft, null, 2)}
 
 出力は修正後の完成形JSONオブジェクトのみ（同じスキーマ）。`;
+}
+
+function resolveCategoryId(
+  categoryName: string,
+  categories: Array<{ id: string; name: string }>,
+): string | null {
+  if (categories.length === 0) return null;
+  const needle = categoryName.trim().toLowerCase();
+  if (!needle) return categories[0]?.id ?? null;
+  const exact = categories.find((c) => c.name.trim().toLowerCase() === needle);
+  if (exact) return exact.id;
+  const soft = categories.find(
+    (c) =>
+      c.name.trim().toLowerCase().includes(needle) ||
+      needle.includes(c.name.trim().toLowerCase()),
+  );
+  return soft?.id ?? categories[0]?.id ?? null;
 }
 
 function normalizeMime(mime: string): string {
@@ -684,6 +719,7 @@ Deno.serve(async (req) => {
     const mode = body.mode === 'conditioned' ? 'conditioned' : 'auto';
     const keywords = String(body.keywords ?? '').trim();
     const referenceUrl = String(body.reference_url ?? '').trim();
+    const requestedCategoryId = String(body.category_id ?? '').trim();
     const inlineImage = body.image ? validateInlineImage(body.image) : null;
 
     if (mode === 'conditioned') {
@@ -796,6 +832,89 @@ Deno.serve(async (req) => {
       question: string;
     }>;
 
+    const { data: categoryRows } = await supabase
+      .from('certification_categories')
+      .select('id, name')
+      .eq('certification_id', certificationId)
+      .order('sort_order', { ascending: true });
+    const categories = (categoryRows ?? []) as Array<{
+      id: string;
+      name: string;
+    }>;
+    if (categories.length === 0) {
+      return jsonResponse(
+        {
+          ok: false,
+          retryable: false,
+          error:
+            'カテゴリマスタが未整備のため例題を作成できません。資格の分析マスタを用意してから再度お試しください。',
+        },
+        400,
+      );
+    }
+
+    let forcedCategoryId: string | null = null;
+    if (requestedCategoryId) {
+      const hit = categories.find((c) => c.id === requestedCategoryId);
+      if (!hit) {
+        return jsonResponse(
+          {
+            ok: false,
+            retryable: false,
+            error: '指定されたカテゴリがマスタに存在しないため、例題を作成できません。',
+          },
+          400,
+        );
+      }
+      forcedCategoryId = hit.id;
+    }
+
+    if (keywords) {
+      const { data: keywordRows } = await supabase
+        .from('certification_keywords')
+        .select('name')
+        .eq('certification_id', certificationId);
+      const masterNames = (keywordRows ?? []).map((r) => String(r.name ?? ''));
+      const tokens = keywords
+        .split(/[,、/\n]+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      const normalize = (name: string) =>
+        name
+          .trim()
+          .toLowerCase()
+          .replace(/[\s_\-　]+/g, '')
+          .replace(/[（(].*$/, '');
+      const masters = masterNames.map((name) => ({
+        name,
+        key: normalize(name),
+      }));
+      const unmatched = tokens.filter((token) => {
+        const key = normalize(token);
+        if (!key) return false;
+        return !masters.some(
+          (m) => m.key === key || m.key.includes(key) || key.includes(m.key),
+        );
+      });
+      if (masterNames.length === 0 || unmatched.length > 0) {
+        return jsonResponse(
+          {
+            ok: false,
+            retryable: false,
+            error:
+              unmatched.length > 0
+                ? `キーワードマスタと整合できないため例題を作成できません（不一致: ${unmatched.join('、')}）。`
+                : 'キーワードマスタが未整備のため、キーワード指定では例題を作成できません。',
+          },
+          400,
+        );
+      }
+    }
+
+    const categoryNames = forcedCategoryId
+      ? categories.filter((c) => c.id === forcedCategoryId).map((c) => c.name)
+      : categories.map((c) => c.name);
+
     let referenceFacts: string | null = null;
     if (mode === 'conditioned' && referenceUrl) {
       try {
@@ -847,6 +966,7 @@ Deno.serve(async (req) => {
           referenceFacts,
           imageMode,
           imageJudgeReason,
+          categoryNames,
         }),
       },
     ];
@@ -862,6 +982,8 @@ Deno.serve(async (req) => {
     let draft = normalizeDraft(
       await callGeminiJson(geminiKey, geminiModel, generateParts),
     );
+    let categoryId =
+      forcedCategoryId ?? resolveCategoryId(draft.category_name, categories);
 
     const { data: inserted, error: insertError } = await supabase
       .from('examples')
@@ -871,6 +993,7 @@ Deno.serve(async (req) => {
         question: draft.question || '（問題文未設定）',
         answer: draft.answer,
         explanation: draft.explanation || '（解説未設定）',
+        category_id: categoryId,
       })
       .select('id')
       .single();
@@ -931,10 +1054,14 @@ Deno.serve(async (req) => {
               format,
               draft,
               existing,
+              categoryNames,
             }),
           },
         ]),
       );
+      categoryId =
+        forcedCategoryId ??
+        resolveCategoryId(draft.category_name, categories);
 
       let questionImages: string[] = [];
       if (inlineImage && imageMode === 'use_attached') {
@@ -974,6 +1101,7 @@ Deno.serve(async (req) => {
           answer: draft.answer,
           explanation: draft.explanation || '（解説未設定）',
           question_images: questionImages,
+          category_id: categoryId,
         })
         .eq('id', exampleId);
 

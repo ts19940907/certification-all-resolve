@@ -210,8 +210,10 @@ export function AdminReportsScreen({ onBack }: Props) {
                 {report.exampleTitle}
               </Text>
               <Text style={styles.meta}>
-                対象: {reportTargetLabel(report.target)} ／ 例題ID:{' '}
-                {report.exampleId}
+                対象: {reportTargetLabel(report.target)}
+                {report.exampleId
+                  ? ` ／ 例題ID: ${report.exampleId}`
+                  : ' ／ （例題なし・マスタ変更）'}
               </Text>
               <Text style={styles.message}>{report.message}</Text>
               {report.status === 'resolved' && report.adminResponse ? (

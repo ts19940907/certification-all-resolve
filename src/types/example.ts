@@ -40,6 +40,8 @@ export function questionFormatLabel(bit: QuestionFormatBit): string {
 export type ExampleSummary = {
   id: string;
   title: string;
+  categoryId: string | null;
+  categoryName: string | null;
 };
 
 export type SelectAnswer = {
@@ -58,6 +60,8 @@ export type ExampleDetail = {
   choices: SelectAnswer[];
   /** 署名付きURL（表示用）。無い場合は空配列 */
   questionImageUrls: string[];
+  categoryId: string | null;
+  categoryName: string | null;
 };
 
 export type ConditionedImagePayload = {

@@ -58,7 +58,17 @@ export async function fetchExamples(
 ): Promise<ExampleSummary[]> {
   const { data, error } = await supabase
     .from('examples')
-    .select('id, title')
+    .select(
+      `
+      id,
+      title,
+      category_id,
+      category:certification_categories (
+        id,
+        name
+      )
+    `,
+    )
     .eq('certification_id', certificationId)
     .order('created_at', { ascending: false });
 
@@ -67,10 +77,19 @@ export async function fetchExamples(
     throw error;
   }
 
-  return (data ?? []).map((row) => ({
-    id: row.id as string,
-    title: row.title as string,
-  }));
+  return (data ?? []).map((row) => {
+    const category = row.category as
+      | { id: string; name: string }
+      | { id: string; name: string }[]
+      | null;
+    const cat = Array.isArray(category) ? category[0] : category;
+    return {
+      id: row.id as string,
+      title: row.title as string,
+      categoryId: (row.category_id as string | null) ?? cat?.id ?? null,
+      categoryName: cat?.name ?? null,
+    };
+  });
 }
 
 async function signQuestionImageUrls(paths: string[]): Promise<string[]> {
@@ -102,6 +121,11 @@ export async function fetchExampleDetail(
       answer,
       explanation,
       question_images,
+      category_id,
+      category:certification_categories (
+        id,
+        name
+      ),
       select_answer (
         id,
         value,
@@ -128,6 +152,12 @@ export async function fetchExampleDetail(
     ? (data.question_images as string[])
     : [];
 
+  const category = data.category as
+    | { id: string; name: string }
+    | { id: string; name: string }[]
+    | null;
+  const cat = Array.isArray(category) ? category[0] : category;
+
   return {
     id: data.id as string,
     title: data.title as string,
@@ -136,6 +166,8 @@ export async function fetchExampleDetail(
     explanation: (data.explanation as string) ?? '',
     choices: choicesRaw.map(mapChoice),
     questionImageUrls: await signQuestionImageUrls(imagePaths),
+    categoryId: (data.category_id as string | null) ?? cat?.id ?? null,
+    categoryName: cat?.name ?? null,
   };
 }
 
@@ -227,10 +259,15 @@ async function invokeGenerateExample(
  */
 export async function generateExampleAuto(args: {
   certificationId: string;
+  categoryId?: string | null;
   signal?: AbortSignal;
 }): Promise<GenerateExampleResult> {
   return invokeGenerateExample(
-    { certification_id: args.certificationId, mode: 'auto' },
+    {
+      certification_id: args.certificationId,
+      mode: 'auto',
+      category_id: args.categoryId ?? null,
+    },
     args.signal,
   );
 }
@@ -245,6 +282,7 @@ export async function generateExampleConditioned(args: {
   keywords: string;
   referenceUrl: string;
   image?: ConditionedImagePayload | null;
+  categoryId?: string | null;
   signal?: AbortSignal;
 }): Promise<GenerateExampleResult> {
   return invokeGenerateExample(
@@ -254,6 +292,7 @@ export async function generateExampleConditioned(args: {
       format: args.format,
       keywords: args.keywords.trim(),
       reference_url: args.referenceUrl.trim(),
+      category_id: args.categoryId ?? null,
       image: args.image
         ? {
             mime_type: args.image.mimeType,

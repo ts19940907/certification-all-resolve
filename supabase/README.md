@@ -166,3 +166,42 @@ where mail_address = 'your@email.com';
 
 追加費用なしで確実な自動メール手段が未確定のため、**今回は DB 保存 + 管理者画面 + 報告者へのアプリ内通知**。  
 将来、無料枠の SMTP / 既存メール基盤が用意できたら、新規報告時に管理者へメールする Edge Function を `submitExampleContentReport` 成功後に接続する想定（コード内にコメントあり）。
+
+## 学習分析（カテゴリ／キーワード）
+
+1. SQL Editor で `migrations/20260813120000_cert_analysis_masters.sql` を Run  
+   （カテゴリ・キーワードマスタ / `examples.category_id` / マスタ変更問い合わせ用 target）
+2. Edge Function をデプロイ（Supabase CLI 未インストールなら `npx` 経由）:
+
+```bash
+cd My-app-ADS6
+npx supabase login
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase functions deploy seed-cert-analysis
+npx supabase functions deploy generate-example
+```
+
+（グローバルに入れている場合は `npx` なしの `supabase ...` でも可）
+
+（`generate-example` は例題作成時にカテゴリを保存するよう更新済み）
+
+3. **既存データの一回限りバックフィル**（画面トリガーなし）:
+
+```bash
+SUPABASE_URL=https://xxxx.supabase.co \
+SUPABASE_ANON_KEY=your_anon_key \
+ACCESS_TOKEN=user_access_token \
+node scripts/backfill-cert-analysis.mjs
+```
+
+`ACCESS_TOKEN` はログイン済みユーザーの JWT（ブラウザのセッションや Supabase ダッシュボードから取得）。  
+対象ユーザーが所有する全資格にマスタを生成し、未分類例題へカテゴリを付与します。
+
+4. アプリ
+   - 資格追加時: カテゴリ／キーワードマスタを確認なしで自動生成
+   - 例題作成時: カテゴリを保存
+   - メイン上部「分析」: 全体／月次／週次のレーダー + キーワード進捗（A/B）
+   - 実施履歴の「まとめて解く」詳細: その回のレーダー
+   - カテゴリタグ: マスタ全件ダイアログ
+   - 例題一覧: コンボ + フィルターボタン
+   - マスタ変更は分析ダイアログから問い合わせ（管理者画面で種別表示）

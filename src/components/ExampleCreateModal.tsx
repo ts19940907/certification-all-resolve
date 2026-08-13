@@ -13,11 +13,18 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {
+  fetchCertificationCategories,
+  fetchCertificationKeywords,
+  keywordsAlignWithMaster,
+} from '../lib/analysisApi';
+import {
+  fetchExamples,
   generateExampleAuto,
   generateExampleConditioned,
   getGenerateErrorMessage,
 } from '../lib/examplesApi';
 import { colors } from '../theme/colors';
+import type { CertificationCategory } from '../types/analysis';
 import {
   listEnabledFormats,
   questionFormatLabel,
@@ -101,7 +108,15 @@ export function ExampleCreateModal({
   const [manualAnswer, setManualAnswer] = useState('');
   const [manualExplanation, setManualExplanation] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeIsError, setNoticeIsError] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [categories, setCategories] = useState<CertificationCategory[]>([]);
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>(
+    {},
+  );
+  const [keywordMasterNames, setKeywordMasterNames] = useState<string[]>([]);
+  const [categoryChoice, setCategoryChoice] = useState<string>('auto');
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -122,7 +137,95 @@ export function ExampleCreateModal({
   useEffect(() => {
     if (!visible) return;
     setFormatChoice('auto');
-  }, [visible, questionFormat]);
+    setCategoryChoice('auto');
+    setCategoryMenuOpen(false);
+    setNoticeIsError(false);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [cats, kws, examples] = await Promise.all([
+          fetchCertificationCategories(certificationId),
+          fetchCertificationKeywords(certificationId),
+          fetchExamples(certificationId),
+        ]);
+        if (cancelled) return;
+        setCategories(cats);
+        setKeywordMasterNames(kws.map((k) => k.name));
+        const counts: Record<string, number> = {};
+        for (const example of examples) {
+          if (!example.categoryId) continue;
+          counts[example.categoryId] = (counts[example.categoryId] ?? 0) + 1;
+        }
+        setCategoryCounts(counts);
+      } catch (error) {
+        console.error('[ExampleCreateModal] masters', error);
+        if (!cancelled) {
+          setCategories([]);
+          setCategoryCounts({});
+          setKeywordMasterNames([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, questionFormat, certificationId]);
+
+  const showNotice = (message: string, isError = false) => {
+    setNoticeIsError(isError);
+    setNotice(message);
+  };
+
+  const selectedCategoryId =
+    categoryChoice === 'auto' ? null : categoryChoice;
+
+  const categoryChoiceLabel =
+    categoryChoice === 'auto'
+      ? 'おまかせ（AIが選択）'
+      : (() => {
+          const name =
+            categories.find((c) => c.id === categoryChoice)?.name ?? 'カテゴリ';
+          const count = categoryCounts[categoryChoice] ?? 0;
+          return `${name}（${count}問）`;
+        })();
+
+  const categoryOptionLabel = (cat: CertificationCategory) => {
+    const count = categoryCounts[cat.id] ?? 0;
+    return `${cat.name}（${count}問）`;
+  };
+
+  const validateBeforeGenerate = (withKeywords: boolean): boolean => {
+    if (categories.length === 0) {
+      showNotice(
+        'カテゴリマスタが未整備のため例題を作成できません。先に分析マスタを用意してください。',
+        true,
+      );
+      return false;
+    }
+    if (selectedCategoryId) {
+      const exists = categories.some((c) => c.id === selectedCategoryId);
+      if (!exists) {
+        showNotice(
+          '指定されたカテゴリがマスタに存在しないため、例題を作成できません。',
+          true,
+        );
+        return false;
+      }
+    }
+    if (withKeywords && keywords.trim()) {
+      const aligned = keywordsAlignWithMaster(keywords, keywordMasterNames);
+      if (!aligned.ok) {
+        showNotice(
+          keywordMasterNames.length === 0
+            ? 'キーワードマスタが未整備のため、キーワード指定では例題を作成できません。'
+            : `キーワードマスタと整合できないため例題を作成できません（不一致: ${aligned.unmatched.join('、')}）。マスタにある用語に合わせてください。`,
+          true,
+        );
+        return false;
+      }
+    }
+    return true;
+  };
 
   const clearConditionedImage = () => {
     setConditionedImage(null);
@@ -143,6 +246,9 @@ export function ExampleCreateModal({
     setManualAnswer('');
     setManualExplanation('');
     setNotice(null);
+    setNoticeIsError(false);
+    setCategoryChoice('auto');
+    setCategoryMenuOpen(false);
   };
 
   const pickImageFromFileList = async (files: FileList | null) => {
@@ -158,6 +264,7 @@ export function ExampleCreateModal({
       setNotice(
         error instanceof Error ? error.message : '画像の読み込みに失敗しました。',
       );
+      setNoticeIsError(true);
     }
   };
 
@@ -196,14 +303,17 @@ export function ExampleCreateModal({
 
   const handleAutoGenerate = async () => {
     if (isGenerating) return;
+    if (!validateBeforeGenerate(false)) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setIsGenerating(true);
     setNotice(null);
+    setNoticeIsError(false);
 
     try {
       const example = await generateExampleAuto({
         certificationId,
+        categoryId: selectedCategoryId,
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
@@ -220,16 +330,18 @@ export function ExampleCreateModal({
       }
       setIsGenerating(false);
       abortRef.current = null;
-      setNotice(getGenerateErrorMessage(error));
+      showNotice(getGenerateErrorMessage(error), true);
     }
   };
 
   const handleConditionedGenerate = async () => {
     if (isGenerating || !canConditionedGenerate) return;
+    if (!validateBeforeGenerate(true)) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setIsGenerating(true);
     setNotice(null);
+    setNoticeIsError(false);
 
     try {
       const example = await generateExampleConditioned({
@@ -238,6 +350,7 @@ export function ExampleCreateModal({
         keywords,
         referenceUrl,
         image: conditionedImage,
+        categoryId: selectedCategoryId,
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
@@ -254,7 +367,7 @@ export function ExampleCreateModal({
       }
       setIsGenerating(false);
       abortRef.current = null;
-      setNotice(getGenerateErrorMessage(error));
+      showNotice(getGenerateErrorMessage(error), true);
     }
   };
 
@@ -325,6 +438,85 @@ export function ExampleCreateModal({
               </Text>
             </Pressable>
           </View>
+
+          {tab === 'ai' ? (
+            <View style={styles.categoryBar}>
+              <Text style={styles.categoryBarTitle}>カテゴリ</Text>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isGenerating}
+                onPress={() => setCategoryMenuOpen((v) => !v)}
+                style={({ pressed }) => [
+                  styles.categoryCombo,
+                  pressed && styles.categoryComboPressed,
+                  isGenerating && styles.disabled,
+                ]}
+              >
+                <Text style={styles.categoryComboLabel} numberOfLines={1}>
+                  {categoryChoiceLabel}
+                </Text>
+                <Text style={styles.categoryComboCaret}>▼</Text>
+              </Pressable>
+              {categoryMenuOpen ? (
+                <ScrollView
+                  style={styles.categoryMenu}
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                >
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      setCategoryChoice('auto');
+                      setCategoryMenuOpen(false);
+                    }}
+                    style={[
+                      styles.categoryOption,
+                      categoryChoice === 'auto' && styles.categoryOptionActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryOptionLabel,
+                        categoryChoice === 'auto' &&
+                          styles.categoryOptionLabelActive,
+                      ]}
+                    >
+                      おまかせ（AIが選択）
+                    </Text>
+                  </Pressable>
+                  {categories.map((cat) => (
+                    <Pressable
+                      key={cat.id}
+                      accessibilityRole="button"
+                      onPress={() => {
+                        setCategoryChoice(cat.id);
+                        setCategoryMenuOpen(false);
+                      }}
+                      style={[
+                        styles.categoryOption,
+                        categoryChoice === cat.id && styles.categoryOptionActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.categoryOptionLabel,
+                          categoryChoice === cat.id &&
+                            styles.categoryOptionLabelActive,
+                        ]}
+                      >
+                        {categoryOptionLabel(cat)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              ) : null}
+              <Text style={styles.categoryBarHint}>
+                {categories.length === 0
+                  ? 'カテゴリマスタがありません。作成前に分析マスタを用意してください。'
+                  : 'キーワード指定時はキーワードマスタと整合させてください。'}
+              </Text>
+            </View>
+          ) : null}
 
           <ScrollView
             style={styles.bodyScroll}
@@ -590,11 +782,16 @@ export function ExampleCreateModal({
         <View style={styles.noticeOverlay}>
           <Pressable style={styles.backdrop} onPress={() => setNotice(null)} />
           <View style={styles.noticeCard}>
-            <Text style={styles.noticeTitle}>お知らせ</Text>
+            <Text style={styles.noticeTitle}>
+              {noticeIsError ? 'エラー' : 'お知らせ'}
+            </Text>
             <Text style={styles.noticeBody}>{notice}</Text>
             <Pressable
               accessibilityRole="button"
-              onPress={() => setNotice(null)}
+              onPress={() => {
+                setNotice(null);
+                setNoticeIsError(false);
+              }}
               style={({ pressed }) => [
                 styles.primaryButton,
                 pressed && styles.primaryButtonPressed,
@@ -807,6 +1004,78 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.muted,
     marginBottom: 10,
+  },
+  categoryBar: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+    gap: 6,
+    zIndex: 2,
+  },
+  categoryBarTitle: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.accentDeep,
+  },
+  categoryBarHint: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 12,
+    color: colors.inkSoft,
+  },
+  categoryCombo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.paper,
+  },
+  categoryComboPressed: {
+    backgroundColor: colors.mist,
+  },
+  categoryComboLabel: {
+    flex: 1,
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 14,
+    color: colors.ink,
+  },
+  categoryComboCaret: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 10,
+    color: colors.muted,
+  },
+  categoryMenu: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+    maxHeight: 180,
+  },
+  categoryOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  categoryOptionActive: {
+    backgroundColor: colors.accentSoft,
+  },
+  categoryOptionLabel: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    color: colors.inkSoft,
+  },
+  categoryOptionLabelActive: {
+    fontFamily: 'NotoSansJP_700Bold',
+    color: colors.accentDeep,
   },
   input: {
     borderWidth: 1.5,
