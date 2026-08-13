@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   NotoSansJP_400Regular,
   NotoSansJP_700Bold,
@@ -6,7 +6,15 @@ import {
 } from '@expo-google-fonts/noto-sans-jp';
 import { StatusBar } from 'expo-status-bar';
 import type { Session } from '@supabase/supabase-js';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { NotificationBell } from './src/components/NotificationBell';
+import { fetchCertifications } from './src/lib/certificationsApi';
 import { supabase } from './src/lib/supabase';
 import { fetchIsAdministrator } from './src/lib/exampleReportsApi';
 import { AuthScreen } from './src/screens/AuthScreen';
@@ -15,6 +23,7 @@ import { CertMainScreen } from './src/screens/CertMainScreen';
 import { CertSelectScreen } from './src/screens/CertSelectScreen';
 import { colors } from './src/theme/colors';
 import type { Certification } from './src/types/certification';
+import type { UserNotification } from './src/types/notification';
 
 type Screen = 'select' | 'main' | 'admin';
 
@@ -29,6 +38,12 @@ export default function App() {
   const [activeCertification, setActiveCertification] =
     useState<Certification | null>(null);
   const [isAdministrator, setIsAdministrator] = useState(false);
+  const [pendingExampleId, setPendingExampleId] = useState<string | null>(
+    null,
+  );
+  const [notificationNotice, setNotificationNotice] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -49,6 +64,7 @@ export default function App() {
           setScreen('select');
           setActiveCertification(null);
           setIsAdministrator(false);
+          setPendingExampleId(null);
         }
       },
     );
@@ -86,6 +102,7 @@ export default function App() {
 
   const handleBack = () => {
     setScreen('select');
+    setPendingExampleId(null);
   };
 
   const handleSignOut = async () => {
@@ -94,6 +111,54 @@ export default function App() {
       console.error('[auth] signOut', error);
     }
   };
+
+  const handleOpenFromNotification = useCallback(
+    async (notification: UserNotification) => {
+      setNotificationNotice(null);
+
+      if (!notification.exampleId) {
+        setNotificationNotice(
+          '関連する例題が見つかりません（削除済みの可能性があります）。',
+        );
+        return;
+      }
+
+      if (!notification.certificationId) {
+        setNotificationNotice('関連する資格情報がないため、例題を開けません。');
+        return;
+      }
+
+      try {
+        const alreadyActive =
+          activeCertification?.id === notification.certificationId;
+
+        if (alreadyActive && activeCertification) {
+          setPendingExampleId(notification.exampleId);
+          setScreen('main');
+          return;
+        }
+
+        const certs = await fetchCertifications();
+        const cert = certs.find(
+          (item) => item.id === notification.certificationId,
+        );
+        if (!cert) {
+          setNotificationNotice(
+            '関連する資格が選択一覧にないため、例題を開けません。',
+          );
+          return;
+        }
+
+        setActiveCertification(cert);
+        setPendingExampleId(notification.exampleId);
+        setScreen('main');
+      } catch (error) {
+        console.error('[notifications] open example', error);
+        setNotificationNotice('例題を開けませんでした。');
+      }
+    },
+    [activeCertification],
+  );
 
   if (!fontsLoaded || !authReady) {
     return (
@@ -124,6 +189,7 @@ export default function App() {
               {session.user.email}
             </Text>
             <View style={styles.topBarActions}>
+              <NotificationBell onOpenExample={handleOpenFromNotification} />
               {isAdministrator ? (
                 <Pressable
                   accessibilityRole="button"
@@ -148,10 +214,29 @@ export default function App() {
               </Pressable>
             </View>
           </View>
+          {notificationNotice ? (
+            <View style={styles.noticeBar}>
+              <Text style={styles.noticeText}>{notificationNotice}</Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setNotificationNotice(null)}
+              >
+                <Text style={styles.noticeDismiss}>閉じる</Text>
+              </Pressable>
+            </View>
+          ) : null}
           <CertSelectScreen onSelect={handleSelect} />
         </View>
       ) : (
-        <CertMainScreen certification={activeCertification} onBack={handleBack} />
+        <CertMainScreen
+          certification={activeCertification}
+          onBack={handleBack}
+          openExampleId={pendingExampleId}
+          onOpenExampleConsumed={() => setPendingExampleId(null)}
+          onOpenFromNotification={handleOpenFromNotification}
+          externalNotice={notificationNotice}
+          onDismissExternalNotice={() => setNotificationNotice(null)}
+        />
       )}
       <StatusBar style="dark" />
     </View>
@@ -224,5 +309,29 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 13,
     color: colors.accentDeep,
+  },
+  noticeBar: {
+    marginHorizontal: 20,
+    marginBottom: 4,
+    borderRadius: 10,
+    backgroundColor: '#FFF1EC',
+    borderWidth: 1,
+    borderColor: colors.spotlight,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  noticeText: {
+    flex: 1,
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    color: colors.spotlightDeep,
+  },
+  noticeDismiss: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.spotlightDeep,
   },
 });

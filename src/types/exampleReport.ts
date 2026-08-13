@@ -16,6 +16,8 @@ export type ExampleContentReport = {
   target: ReportTarget;
   message: string;
   status: ReportStatus;
+  adminResponse: string | null;
+  resolvedAt: string | null;
   createdAt: string;
   createdAtLabel: string;
 };

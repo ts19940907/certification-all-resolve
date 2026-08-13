@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import {
   fetchExampleContentReports,
   getReportErrorMessage,
-  updateExampleContentReportStatus,
+  reopenExampleContentReport,
+  resolveExampleContentReport,
 } from '../lib/exampleReportsApi';
 import { colors } from '../theme/colors';
 import {
@@ -22,11 +25,19 @@ type Props = {
   onBack: () => void;
 };
 
+type ResolveDraft = {
+  report: ExampleContentReport;
+  responseText: string;
+};
+
 export function AdminReportsScreen({ onBack }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reports, setReports] = useState<ExampleContentReport[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [resolveDraft, setResolveDraft] = useState<ResolveDraft | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -47,18 +58,79 @@ export function AdminReportsScreen({ onBack }: Props) {
     void load();
   }, [load]);
 
-  const handleResolve = async (report: ExampleContentReport) => {
+  const closeResolveFlow = () => {
     if (busyId) return;
+    setResolveDraft(null);
+    setConfirmOpen(false);
+    setResolveError(null);
+  };
+
+  const handleStartResolve = (report: ExampleContentReport) => {
+    if (busyId) return;
+    setResolveDraft({ report, responseText: '' });
+    setConfirmOpen(false);
+    setResolveError(null);
+  };
+
+  const handleGoConfirm = () => {
+    if (!resolveDraft) return;
+    if (!resolveDraft.responseText.trim()) {
+      setResolveError('対応内容を入力してください。');
+      return;
+    }
+    setResolveError(null);
+    setConfirmOpen(true);
+  };
+
+  const handleConfirmResolve = async () => {
+    if (!resolveDraft || busyId) return;
+    const { report, responseText } = resolveDraft;
     setBusyId(report.id);
+    setResolveError(null);
     try {
-      const next = report.status === 'open' ? 'resolved' : 'open';
-      await updateExampleContentReportStatus({
+      await resolveExampleContentReport({
         reportId: report.id,
-        status: next,
+        adminResponse: responseText,
       });
       setReports((prev) =>
         prev.map((item) =>
-          item.id === report.id ? { ...item, status: next } : item,
+          item.id === report.id
+            ? {
+                ...item,
+                status: 'resolved',
+                adminResponse: responseText.trim(),
+                resolvedAt: new Date().toISOString(),
+              }
+            : item,
+        ),
+      );
+      setResolveDraft(null);
+      setConfirmOpen(false);
+    } catch (err) {
+      setResolveError(
+        getReportErrorMessage(err, '対応済への更新に失敗しました。'),
+      );
+      setConfirmOpen(false);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleReopen = async (report: ExampleContentReport) => {
+    if (busyId) return;
+    setBusyId(report.id);
+    try {
+      await reopenExampleContentReport(report.id);
+      setReports((prev) =>
+        prev.map((item) =>
+          item.id === report.id
+            ? {
+                ...item,
+                status: 'open',
+                adminResponse: null,
+                resolvedAt: null,
+              }
+            : item,
         ),
       );
     } catch (err) {
@@ -142,31 +214,170 @@ export function AdminReportsScreen({ onBack }: Props) {
                 {report.exampleId}
               </Text>
               <Text style={styles.message}>{report.message}</Text>
-              <Pressable
-                accessibilityRole="button"
-                disabled={busyId === report.id}
-                onPress={() => {
-                  void handleResolve(report);
-                }}
-                style={({ pressed }) => [
-                  styles.statusButton,
-                  pressed && styles.statusButtonPressed,
-                ]}
-              >
-                {busyId === report.id ? (
-                  <ActivityIndicator color={colors.accentDeep} />
-                ) : (
-                  <Text style={styles.statusButtonLabel}>
-                    {report.status === 'open'
-                      ? '対応済にする'
-                      : '未対応に戻す'}
-                  </Text>
-                )}
-              </Pressable>
+              {report.status === 'resolved' && report.adminResponse ? (
+                <View style={styles.responseBox}>
+                  <Text style={styles.responseLabel}>対応内容</Text>
+                  <Text style={styles.responseBody}>{report.adminResponse}</Text>
+                </View>
+              ) : null}
+              {report.status === 'open' ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busyId === report.id}
+                  onPress={() => handleStartResolve(report)}
+                  style={({ pressed }) => [
+                    styles.statusButton,
+                    pressed && styles.statusButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.statusButtonLabel}>対応済にする</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busyId === report.id}
+                  onPress={() => {
+                    void handleReopen(report);
+                  }}
+                  style={({ pressed }) => [
+                    styles.statusButton,
+                    pressed && styles.statusButtonPressed,
+                  ]}
+                >
+                  {busyId === report.id ? (
+                    <ActivityIndicator color={colors.accentDeep} />
+                  ) : (
+                    <Text style={styles.statusButtonLabel}>未対応に戻す</Text>
+                  )}
+                </Pressable>
+              )}
             </View>
           ))}
         </ScrollView>
       )}
+
+      <Modal
+        visible={resolveDraft != null && !confirmOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeResolveFlow}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalBackdrop} onPress={closeResolveFlow} />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>対応内容を入力</Text>
+            <Text style={styles.modalLead}>
+              報告者の通知に表示されます。対応方針や修正内容を書いてください。
+            </Text>
+            {resolveDraft ? (
+              <Text style={styles.modalMeta} numberOfLines={2}>
+                {resolveDraft.report.exampleTitle}
+              </Text>
+            ) : null}
+            <TextInput
+              value={resolveDraft?.responseText ?? ''}
+              onChangeText={(text) => {
+                setResolveDraft((prev) =>
+                  prev ? { ...prev, responseText: text } : prev,
+                );
+                if (resolveError) setResolveError(null);
+              }}
+              multiline
+              placeholder="例: 問題文の誤記を修正しました。"
+              placeholderTextColor={colors.muted}
+              style={styles.modalInput}
+              textAlignVertical="top"
+            />
+            {resolveError ? (
+              <Text style={styles.modalError}>{resolveError}</Text>
+            ) : null}
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={closeResolveFlow}
+                style={({ pressed }) => [
+                  styles.modalSecondary,
+                  pressed && styles.modalSecondaryPressed,
+                ]}
+              >
+                <Text style={styles.modalSecondaryLabel}>キャンセル</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={handleGoConfirm}
+                style={({ pressed }) => [
+                  styles.modalPrimary,
+                  pressed && styles.modalPrimaryPressed,
+                ]}
+              >
+                <Text style={styles.modalPrimaryLabel}>確認へ</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={resolveDraft != null && confirmOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!busyId) setConfirmOpen(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => {
+              if (!busyId) setConfirmOpen(false);
+            }}
+          />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>対応内容の確認</Text>
+            <Text style={styles.modalLead}>
+              この内容で対応済にし、報告者へ通知します。よろしいですか？
+            </Text>
+            <ScrollView style={styles.confirmScroll}>
+              <Text style={styles.confirmBody}>
+                {resolveDraft?.responseText.trim() ?? ''}
+              </Text>
+            </ScrollView>
+            {resolveError ? (
+              <Text style={styles.modalError}>{resolveError}</Text>
+            ) : null}
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={Boolean(busyId)}
+                onPress={() => setConfirmOpen(false)}
+                style={({ pressed }) => [
+                  styles.modalSecondary,
+                  pressed && styles.modalSecondaryPressed,
+                ]}
+              >
+                <Text style={styles.modalSecondaryLabel}>戻る</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={Boolean(busyId)}
+                onPress={() => {
+                  void handleConfirmResolve();
+                }}
+                style={({ pressed }) => [
+                  styles.modalPrimary,
+                  pressed && styles.modalPrimaryPressed,
+                ]}
+              >
+                {busyId ? (
+                  <ActivityIndicator color={colors.paper} />
+                ) : (
+                  <Text style={styles.modalPrimaryLabel}>対応済にする</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -302,6 +513,24 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     marginTop: 4,
   },
+  responseBox: {
+    marginTop: 6,
+    borderRadius: 10,
+    backgroundColor: colors.mist,
+    padding: 10,
+    gap: 4,
+  },
+  responseLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.accentDeep,
+  },
+  responseBody: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.inkSoft,
+  },
   statusButton: {
     alignSelf: 'flex-start',
     marginTop: 8,
@@ -321,5 +550,110 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 13,
     color: colors.accentDeep,
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(20, 28, 36, 0.45)',
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 480,
+    backgroundColor: colors.paper,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: 18,
+    gap: 10,
+    zIndex: 1,
+  },
+  modalTitle: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 17,
+    color: colors.ink,
+  },
+  modalLead: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.inkSoft,
+  },
+  modalMeta: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.muted,
+  },
+  modalInput: {
+    minHeight: 120,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.mist,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 14,
+    lineHeight: 22,
+    color: colors.ink,
+  },
+  modalError: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 13,
+    color: colors.spotlightDeep,
+  },
+  confirmScroll: {
+    maxHeight: 180,
+    borderRadius: 12,
+    backgroundColor: colors.mist,
+    padding: 12,
+  },
+  confirmBody: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 14,
+    lineHeight: 22,
+    color: colors.ink,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 4,
+  },
+  modalSecondary: {
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: colors.paper,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  modalSecondaryPressed: {
+    backgroundColor: colors.mist,
+  },
+  modalSecondaryLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.inkSoft,
+  },
+  modalPrimary: {
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: colors.accentDeep,
+    minWidth: 120,
+    alignItems: 'center',
+  },
+  modalPrimaryPressed: {
+    opacity: 0.88,
+  },
+  modalPrimaryLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.paper,
   },
 });

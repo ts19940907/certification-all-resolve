@@ -13,6 +13,7 @@ import {
 import { ExampleCreateModal } from '../components/ExampleCreateModal';
 import { ExampleReportModal } from '../components/ExampleReportModal';
 import { ExampleSolveModal } from '../components/ExampleSolveModal';
+import { NotificationBell } from '../components/NotificationBell';
 import { deleteExample, fetchExamples, shuffleChoices } from '../lib/examplesApi';
 import { getErrorMessage } from '../lib/certificationsApi';
 import {
@@ -39,10 +40,16 @@ import {
   isKeywordReviewDetail,
 } from '../types/history';
 import type { KeywordReviewResult, UnderstandingGrade } from '../types/keywordReview';
+import type { UserNotification } from '../types/notification';
 
 type Props = {
   certification: Certification;
   onBack: () => void;
+  openExampleId?: string | null;
+  onOpenExampleConsumed?: () => void;
+  onOpenFromNotification?: (notification: UserNotification) => void;
+  externalNotice?: string | null;
+  onDismissExternalNotice?: () => void;
 };
 
 type SolveSession = {
@@ -82,7 +89,15 @@ function gradeAccent(grade: UnderstandingGrade): string {
   }
 }
 
-export function CertMainScreen({ certification, onBack }: Props) {
+export function CertMainScreen({
+  certification,
+  onBack,
+  openExampleId = null,
+  onOpenExampleConsumed,
+  onOpenFromNotification,
+  externalNotice = null,
+  onDismissExternalNotice,
+}: Props) {
   const { width } = useWindowDimensions();
   const isWide = width >= 900;
   const isMid = width >= 720;
@@ -145,6 +160,17 @@ export function CertMainScreen({ certification, onBack }: Props) {
     void loadHistories();
   }, [loadHistories]);
 
+  useEffect(() => {
+    if (externalNotice) {
+      setNoticeMessage(externalNotice);
+    }
+  }, [externalNotice]);
+
+  const dismissNotice = () => {
+    setNoticeMessage(null);
+    onDismissExternalNotice?.();
+  };
+
   const availableCount = examples.length;
   const maxSelectableCount = Math.min(MAX_QUESTION_COUNT, availableCount);
   const canStartBatch =
@@ -173,6 +199,35 @@ export function CertMainScreen({ certification, onBack }: Props) {
       resumeMode: false,
     });
   };
+
+  useEffect(() => {
+    if (!openExampleId || examplesLoading) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const exists = await exampleExists(openExampleId);
+        if (cancelled) return;
+        if (!exists) {
+          setNoticeMessage(
+            'この例題は削除されているため、開けません。',
+          );
+          onOpenExampleConsumed?.();
+          return;
+        }
+        openSolve(openExampleId);
+        onOpenExampleConsumed?.();
+      } catch (error) {
+        if (cancelled) return;
+        setNoticeMessage(
+          getHistoryErrorMessage(error, '例題を開けませんでした。'),
+        );
+        onOpenExampleConsumed?.();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [openExampleId, examplesLoading, onOpenExampleConsumed]);
 
   const openExampleFromBatchHistory = async (exampleId: string) => {
     try {
@@ -374,6 +429,9 @@ export function CertMainScreen({ certification, onBack }: Props) {
             </View>
             <View style={styles.headerTitleSpacer} />
             <View style={[styles.headerSide, styles.headerSideRight]}>
+              {onOpenFromNotification ? (
+                <NotificationBell onOpenExample={onOpenFromNotification} />
+              ) : null}
               <Pressable
                 accessibilityRole="button"
                 style={({ pressed }) => [
@@ -401,6 +459,9 @@ export function CertMainScreen({ certification, onBack }: Props) {
               </Text>
             </View>
             <View style={styles.headerSideRightStacked}>
+              {onOpenFromNotification ? (
+                <NotificationBell onOpenExample={onOpenFromNotification} />
+              ) : null}
               <Pressable
                 accessibilityRole="button"
                 style={({ pressed }) => [
@@ -927,12 +988,12 @@ export function CertMainScreen({ certification, onBack }: Props) {
         visible={noticeMessage != null}
         transparent
         animationType="fade"
-        onRequestClose={() => setNoticeMessage(null)}
+        onRequestClose={dismissNotice}
       >
         <View style={styles.modalOverlay}>
           <Pressable
             style={styles.modalBackdrop}
-            onPress={() => setNoticeMessage(null)}
+            onPress={dismissNotice}
           />
           <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
             <Text style={styles.modalTitle}>お知らせ</Text>
@@ -940,7 +1001,7 @@ export function CertMainScreen({ certification, onBack }: Props) {
             <View style={styles.modalActions}>
               <Pressable
                 accessibilityRole="button"
-                onPress={() => setNoticeMessage(null)}
+                onPress={dismissNotice}
                 style={({ pressed }) => [
                   styles.modalPrimaryButton,
                   pressed && styles.modalPrimaryButtonPressed,

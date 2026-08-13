@@ -145,7 +145,9 @@ SQL Editor で `migrations/20260807160000_fix_example_delete.sql` を Run。
 
 1. SQL Editor で `migrations/20260813100000_example_content_reports.sql` を Run  
    （`users.is_administrator` / `example_content_reports` / RLS）
-2. 管理者にするユーザーを SQL で指定（クライアントからは変更不可）:
+2. 続けて `migrations/20260813110000_user_notifications.sql` を Run  
+   （対応コメント欄 / `user_notifications` / 対応済 RPC）
+3. 管理者にするユーザーを SQL で指定（クライアントからは変更不可）:
 
 ```sql
 update public.users
@@ -153,12 +155,14 @@ set is_administrator = true
 where mail_address = 'your@email.com';
 ```
 
-3. アプリ
+4. アプリ
    - 例題一覧の「誤りを連絡」、解答画面ヘッダーの「誤りを連絡」（答え合わせ前後どちらでも可）
    - 対象（問題文／選択肢・回答／解説／その他）＋自由記述。内部に `example_id` を保存
    - `is_administrator = true` のアカウントのみ、資格選択画面右上に「管理者」→ 問い合わせ一覧
+   - 管理者の「対応済にする」→ 対応内容入力 → 確認ダイアログ → 確定で報告者へアプリ内通知
+   - 報告者は選択画面・メイン画面の「通知」から既読にし、該当例題を開ける
 
 ### メール通知について
 
-追加費用なしで確実な自動メール手段が未確定のため、**今回は DB 保存 + 管理者画面のみ**。  
-将来、無料枠の SMTP / 既存メール基盤が用意できたら `submitExampleContentReport` 成功後に Edge Function を接続する想定（コード内にコメントあり）。
+追加費用なしで確実な自動メール手段が未確定のため、**今回は DB 保存 + 管理者画面 + 報告者へのアプリ内通知**。  
+将来、無料枠の SMTP / 既存メール基盤が用意できたら、新規報告時に管理者へメールする Edge Function を `submitExampleContentReport` 成功後に接続する想定（コード内にコメントあり）。

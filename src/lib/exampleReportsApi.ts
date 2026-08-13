@@ -2,7 +2,6 @@ import { supabase } from './supabase';
 import { getErrorMessage } from './certificationsApi';
 import type {
   ExampleContentReport,
-  ReportStatus,
   ReportTarget,
 } from '../types/exampleReport';
 
@@ -16,6 +15,8 @@ type ReportRow = {
   target: string;
   message: string;
   status: string;
+  admin_response: string | null;
+  resolved_at: string | null;
   created_at: string;
 };
 
@@ -40,7 +41,9 @@ function mapReport(row: ReportRow): ExampleContentReport {
     reporterUserId: row.reporter_user_id,
     target: row.target as ReportTarget,
     message: row.message,
-    status: row.status as ReportStatus,
+    status: row.status as ExampleContentReport['status'],
+    adminResponse: row.admin_response,
+    resolvedAt: row.resolved_at,
     createdAt: row.created_at,
     createdAtLabel: formatCreatedAt(row.created_at),
   };
@@ -106,7 +109,7 @@ export async function submitExampleContentReport(args: {
     throw error;
   }
 
-  // メール通知は追加費用なしの手段が整い次第、ここで Edge Function 等に接続する予定
+  // 管理者へのメール通知は追加費用なしの手段が整い次第、ここで Edge Function 等に接続する予定
 }
 
 export async function fetchExampleContentReports(): Promise<
@@ -125,6 +128,8 @@ export async function fetchExampleContentReports(): Promise<
       target,
       message,
       status,
+      admin_response,
+      resolved_at,
       created_at
     `,
     )
@@ -138,17 +143,36 @@ export async function fetchExampleContentReports(): Promise<
   return ((data ?? []) as ReportRow[]).map(mapReport);
 }
 
-export async function updateExampleContentReportStatus(args: {
+/** 対応内容を保存し、報告者へアプリ内通知を送って対応済にする */
+export async function resolveExampleContentReport(args: {
   reportId: string;
-  status: ReportStatus;
+  adminResponse: string;
 }): Promise<void> {
-  const { error } = await supabase
-    .from('example_content_reports')
-    .update({ status: args.status })
-    .eq('id', args.reportId);
+  const adminResponse = args.adminResponse.trim();
+  if (!adminResponse) {
+    throw new Error('対応内容を入力してください。');
+  }
+
+  const { error } = await supabase.rpc('resolve_example_content_report', {
+    p_report_id: args.reportId,
+    p_admin_response: adminResponse,
+  });
 
   if (error) {
-    console.error('[reports] update status', error);
+    console.error('[reports] resolve', error);
+    throw error;
+  }
+}
+
+export async function reopenExampleContentReport(
+  reportId: string,
+): Promise<void> {
+  const { error } = await supabase.rpc('reopen_example_content_report', {
+    p_report_id: reportId,
+  });
+
+  if (error) {
+    console.error('[reports] reopen', error);
     throw error;
   }
 }
