@@ -17,12 +17,14 @@ import { AnalysisModal } from '../components/AnalysisModal';
 import { CategoryMasterModal } from '../components/CategoryMasterModal';
 import { CategoryRadarChart } from '../components/CategoryRadarChart';
 import { NotificationBell } from '../components/NotificationBell';
+import { ReviewSessionModal } from '../components/ReviewSessionModal';
 import {
   buildSessionCategoryAnalysis,
   fetchCertificationCategories,
   fetchExampleCategoryMap,
 } from '../lib/analysisApi';
-import { deleteExample, fetchExamples, shuffleChoices } from '../lib/examplesApi';
+import { deleteExample, fetchExamples } from '../lib/examplesApi';
+import { pickBatchExampleIds } from '../lib/batchPick';
 import { getErrorMessage } from '../lib/certificationsApi';
 import {
   exampleExists,
@@ -34,6 +36,7 @@ import {
   getKeywordReviewErrorMessage,
   reviewKeyword,
 } from '../lib/keywordReviewApi';
+import { fetchDueSrsCount, upsertKeywordSrsCard } from '../lib/srsApi';
 import { colors } from '../theme/colors';
 import type {
   CategoryUnderstanding,
@@ -82,10 +85,6 @@ function clampQuestionCount(value: number, available: number) {
   }
   const minAllowed = Math.min(MIN_QUESTION_COUNT, maxAllowed);
   return Math.min(maxAllowed, Math.max(minAllowed, value));
-}
-
-function pickRandomExampleIds(ids: string[], count: number): string[] {
-  return shuffleChoices(ids).slice(0, count);
 }
 
 function gradeAccent(grade: UnderstandingGrade): string {
@@ -137,6 +136,9 @@ export function CertMainScreen({
   const [reportTarget, setReportTarget] = useState<ExampleSummary | null>(null);
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [categoryMasterOpen, setCategoryMasterOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [dueCount, setDueCount] = useState(0);
+  const [batchPickBusy, setBatchPickBusy] = useState(false);
   const [categories, setCategories] = useState<CertificationCategory[]>([]);
   const [filterDraft, setFilterDraft] = useState<string>('all');
   const [filterApplied, setFilterApplied] = useState<string>('all');
@@ -177,6 +179,15 @@ export function CertMainScreen({
     }
   }, [certification.id]);
 
+  const loadDueCount = useCallback(async () => {
+    try {
+      const count = await fetchDueSrsCount(certification.id);
+      setDueCount(count);
+    } catch (error) {
+      console.error('[CertMainScreen] due count', error);
+    }
+  }, [certification.id]);
+
   useEffect(() => {
     void loadExamples();
   }, [loadExamples]);
@@ -184,6 +195,10 @@ export function CertMainScreen({
   useEffect(() => {
     void loadHistories();
   }, [loadHistories]);
+
+  useEffect(() => {
+    void loadDueCount();
+  }, [loadDueCount]);
 
   useEffect(() => {
     if (externalNotice) {
@@ -285,11 +300,13 @@ export function CertMainScreen({
     }
   };
 
-  const openBatchSolve = () => {
-    if (!canStartBatch) {
-      setNoticeMessage(
-        `まとめて解くには例題が${MIN_QUESTION_COUNT}問以上必要です（現在 ${availableCount} 問）。`,
-      );
+  const openBatchSolve = async () => {
+    if (!canStartBatch || batchPickBusy) {
+      if (!canStartBatch) {
+        setNoticeMessage(
+          `まとめて解くには例題が${MIN_QUESTION_COUNT}問以上必要です（現在 ${availableCount} 問）。`,
+        );
+      }
       return;
     }
     const parsed = Number(questionCountText);
@@ -298,20 +315,30 @@ export function CertMainScreen({
       availableCount,
     );
     setQuestionCountText(String(count));
-    const picked = pickRandomExampleIds(
-      examples.map((item) => item.id),
-      count,
-    );
-    if (picked.length === 0) {
-      setNoticeMessage('解ける例題がありません。');
-      return;
+    setBatchPickBusy(true);
+    try {
+      const picked = await pickBatchExampleIds({
+        certificationId: certification.id,
+        exampleIds: examples.map((item) => item.id),
+        count,
+      });
+      if (picked.length === 0) {
+        setNoticeMessage('解ける例題がありません。');
+        return;
+      }
+      setSolveSession({
+        exampleIds: picked,
+        historyId: null,
+        initialMessages: [],
+        resumeMode: false,
+      });
+    } catch (error) {
+      setNoticeMessage(
+        getErrorMessage(error, '出題の準備に失敗しました。もう一度お試しください。'),
+      );
+    } finally {
+      setBatchPickBusy(false);
     }
-    setSolveSession({
-      exampleIds: picked,
-      historyId: null,
-      initialMessages: [],
-      resumeMode: false,
-    });
   };
 
   const openHistoryDetail = async (item: HistorySummary) => {
@@ -379,6 +406,18 @@ export function CertMainScreen({
         certificationId: certification.id,
         review,
       });
+      if (review.grade === 'A' || review.grade === 'B') {
+        try {
+          await upsertKeywordSrsCard({
+            certificationId: certification.id,
+            keyword: review.keyword,
+            explanation: review.explanation,
+          });
+          await loadDueCount();
+        } catch (srsError) {
+          console.error('[CertMainScreen] srs keyword', srsError);
+        }
+      }
       setKeywordReviewResult(review);
       await loadHistories();
     } catch (error) {
@@ -482,6 +521,23 @@ export function CertMainScreen({
             <View style={[styles.headerSide, styles.headerSideRight]}>
               <Pressable
                 accessibilityRole="button"
+                onPress={() => setReviewOpen(true)}
+                style={({ pressed }) => [
+                  styles.srsReviewButton,
+                  pressed && styles.srsReviewButtonPressed,
+                ]}
+              >
+                <Text style={styles.srsReviewButtonLabel}>今日の復習</Text>
+                {dueCount > 0 ? (
+                  <View style={styles.dueBadge}>
+                    <Text style={styles.dueBadgeLabel}>
+                      {dueCount > 99 ? '99+' : String(dueCount)}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
                 onPress={() => setAnalysisOpen(true)}
                 style={({ pressed }) => [
                   styles.analysisButton,
@@ -520,6 +576,23 @@ export function CertMainScreen({
               </Text>
             </View>
             <View style={styles.headerSideRightStacked}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setReviewOpen(true)}
+                style={({ pressed }) => [
+                  styles.srsReviewButton,
+                  pressed && styles.srsReviewButtonPressed,
+                ]}
+              >
+                <Text style={styles.srsReviewButtonLabel}>今日の復習</Text>
+                {dueCount > 0 ? (
+                  <View style={styles.dueBadge}>
+                    <Text style={styles.dueBadgeLabel}>
+                      {dueCount > 99 ? '99+' : String(dueCount)}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
               <Pressable
                 accessibilityRole="button"
                 onPress={() => setAnalysisOpen(true)}
@@ -632,21 +705,27 @@ export function CertMainScreen({
               <Text style={styles.questionCountUnit}>問</Text>
               <Pressable
                 accessibilityRole="button"
-                disabled={!canStartBatch}
-                onPress={openBatchSolve}
+                disabled={!canStartBatch || batchPickBusy}
+                onPress={() => {
+                  void openBatchSolve();
+                }}
                 style={({ pressed }) => [
                   styles.solveButton,
-                  pressed && canStartBatch && styles.solveButtonPressed,
-                  !canStartBatch && styles.solveButtonDisabled,
+                  pressed &&
+                    canStartBatch &&
+                    !batchPickBusy &&
+                    styles.solveButtonPressed,
+                  (!canStartBatch || batchPickBusy) && styles.solveButtonDisabled,
                 ]}
               >
                 <Text
                   style={[
                     styles.solveButtonLabel,
-                    !canStartBatch && styles.solveButtonLabelDisabled,
+                    (!canStartBatch || batchPickBusy) &&
+                      styles.solveButtonLabelDisabled,
                   ]}
                 >
-                  例題を解く
+                  {batchPickBusy ? '準備中…' : '例題を解く'}
                 </Text>
               </Pressable>
               <Text style={styles.questionCountHint}>
@@ -654,7 +733,7 @@ export function CertMainScreen({
                   ? '※例題がありません'
                   : availableCount < MIN_QUESTION_COUNT
                     ? `※まとめて解くには${MIN_QUESTION_COUNT}問以上必要（現在${availableCount}問）`
-                    : `※${MIN_QUESTION_COUNT}〜${maxSelectableCount}問のみ入力可`}
+                    : '※苦手・未解答を優先して出題します'}
               </Text>
             </View>
 
@@ -1148,6 +1227,18 @@ export function CertMainScreen({
         onClose={() => setCategoryMasterOpen(false)}
       />
 
+      <ReviewSessionModal
+        visible={reviewOpen}
+        certificationId={certification.id}
+        onClose={() => {
+          setReviewOpen(false);
+          void loadDueCount();
+        }}
+        onSessionFinished={() => {
+          void loadDueCount();
+        }}
+      />
+
       <ExampleSolveModal
         visible={solveSession != null}
         exampleIds={solveSession?.exampleIds ?? []}
@@ -1156,9 +1247,13 @@ export function CertMainScreen({
         historyId={solveSession?.historyId ?? null}
         initialMessages={solveSession?.initialMessages ?? []}
         resumeMode={solveSession?.resumeMode ?? false}
-        onClose={() => setSolveSession(null)}
+        onClose={() => {
+          setSolveSession(null);
+          void loadDueCount();
+        }}
         onHistoryChanged={() => {
           void loadHistories();
+          void loadDueCount();
         }}
       />
 
@@ -1329,6 +1424,41 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 14,
     color: colors.accentDeep,
+  },
+  srsReviewButton: {
+    minHeight: 42,
+    borderRadius: 12,
+    backgroundColor: colors.paper,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  srsReviewButtonPressed: {
+    backgroundColor: colors.accentSoft,
+  },
+  srsReviewButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.ink,
+  },
+  dueBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    backgroundColor: colors.accentDeep,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dueBadgeLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 11,
+    color: colors.paper,
   },
   filterRow: {
     flexDirection: 'row',

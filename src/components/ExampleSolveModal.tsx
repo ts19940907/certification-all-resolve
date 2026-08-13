@@ -27,6 +27,7 @@ import {
   insertExampleBatchHistory,
   updateAiChatHistory,
 } from '../lib/historiesApi';
+import { ensureExampleSrsCard } from '../lib/srsApi';
 import { ExampleReportModal } from './ExampleReportModal';
 import { colors } from '../theme/colors';
 import {
@@ -242,8 +243,8 @@ export function ExampleSolveModal({
 
   const handleCheck = () => {
     if (!canCheck || !example || !exampleId) return;
+    const correct = evaluateCurrentAnswer();
     if (isBatch) {
-      const correct = evaluateCurrentAnswer();
       setBatchResults((prev) => {
         const next = [...prev];
         next[queueIndex] = {
@@ -255,6 +256,14 @@ export function ExampleSolveModal({
       });
     }
     setRevealed(true);
+    if (correct) {
+      void ensureExampleSrsCard({
+        certificationId,
+        exampleId,
+      }).catch((err) => {
+        console.error('[ExampleSolveModal] srs card', err);
+      });
+    }
   };
 
   const batchCorrectCount = useMemo(
