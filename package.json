@@ -32,8 +32,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web --port 8081",
-    "desktop": "concurrently -k \"npm run web\" \"wait-on http://127.0.0.1:8081 && cross-env ELECTRON_DEV=1 electron ./electron/main.js\"",
     "export:web": "expo export --platform web",
+    "desktop": "concurrently -k \"npm run web\" \"wait-on http://127.0.0.1:8081 && cross-env ELECTRON_DEV=1 electron ./electron/main.js\"",
     "desktop:pack": "npm run export:web && electron-builder --mac --win"
   },
   "build": {

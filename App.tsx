@@ -15,6 +15,15 @@ import {
 } from 'react-native';
 import { NotificationBell } from './src/components/NotificationBell';
 import { fetchCertifications } from './src/lib/certificationsApi';
+import {
+  getAppRoute,
+  navigateAppRoute,
+  parseAppRoute,
+  pathForRoute,
+  sanitizeNextPath,
+  subscribeAppRoute,
+  type AppRoute,
+} from './src/lib/appRouting';
 import { supabase } from './src/lib/supabase';
 import { fetchIsAdministrator } from './src/lib/exampleReportsApi';
 import { AuthScreen } from './src/screens/AuthScreen';
@@ -25,7 +34,11 @@ import { colors } from './src/theme/colors';
 import type { Certification } from './src/types/certification';
 import type { UserNotification } from './src/types/notification';
 
-type Screen = 'select' | 'main' | 'admin';
+function routeFromNext(next: string | undefined): AppRoute {
+  const safe = sanitizeNextPath(next);
+  if (!safe) return { name: 'select' };
+  return parseAppRoute(safe, '');
+}
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -34,16 +47,24 @@ export default function App() {
   });
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [screen, setScreen] = useState<Screen>('select');
+  const [route, setRoute] = useState<AppRoute>(() => getAppRoute());
   const [activeCertification, setActiveCertification] =
     useState<Certification | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
   const [isAdministrator, setIsAdministrator] = useState(false);
+  const [adminReady, setAdminReady] = useState(false);
   const [pendingExampleId, setPendingExampleId] = useState<string | null>(
     null,
   );
   const [notificationNotice, setNotificationNotice] = useState<string | null>(
     null,
   );
+
+  useEffect(() => {
+    return subscribeAppRoute(() => {
+      setRoute(getAppRoute());
+    });
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -61,10 +82,11 @@ export default function App() {
       (_event, nextSession) => {
         setSession(nextSession);
         if (!nextSession) {
-          setScreen('select');
           setActiveCertification(null);
           setIsAdministrator(false);
+          setAdminReady(false);
           setPendingExampleId(null);
+          navigateAppRoute({ name: 'login' }, 'replace');
         }
       },
     );
@@ -78,9 +100,11 @@ export default function App() {
   useEffect(() => {
     if (!session) {
       setIsAdministrator(false);
+      setAdminReady(false);
       return;
     }
     let cancelled = false;
+    setAdminReady(false);
     void (async () => {
       try {
         const admin = await fetchIsAdministrator();
@@ -88,6 +112,8 @@ export default function App() {
       } catch (error) {
         console.error('[auth] is_administrator', error);
         if (!cancelled) setIsAdministrator(false);
+      } finally {
+        if (!cancelled) setAdminReady(true);
       }
     })();
     return () => {
@@ -95,14 +121,110 @@ export default function App() {
     };
   }, [session]);
 
+  useEffect(() => {
+    if (!authReady) return;
+
+    if (!session) {
+      if (route.name !== 'login') {
+        const intended = pathForRoute(route);
+        navigateAppRoute(
+          {
+            name: 'login',
+            next: intended === '/login' ? undefined : intended,
+          },
+          'replace',
+        );
+      }
+      return;
+    }
+
+    if (route.name === 'login') {
+      navigateAppRoute(routeFromNext(route.next), 'replace');
+    }
+  }, [authReady, session, route]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    if (route.name === 'login') {
+      setRouteLoading(false);
+      return;
+    }
+
+    if (route.name === 'admin') {
+      if (!adminReady) {
+        setRouteLoading(true);
+        return;
+      }
+      if (!isAdministrator) {
+        navigateAppRoute({ name: 'select' }, 'replace');
+      }
+      setActiveCertification(null);
+      setRouteLoading(false);
+      return;
+    }
+
+    if (route.name === 'select') {
+      setActiveCertification(null);
+      setRouteLoading(false);
+      return;
+    }
+
+    const certificationId = route.certificationId;
+    if (activeCertification?.id === certificationId) {
+      setRouteLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setRouteLoading(true);
+    void (async () => {
+      try {
+        const certs = await fetchCertifications();
+        if (cancelled) return;
+        const cert = certs.find((item) => item.id === certificationId);
+        if (!cert) {
+          setNotificationNotice(
+            '指定された資格が見つからないため、選択画面に戻ります。',
+          );
+          setActiveCertification(null);
+          navigateAppRoute({ name: 'select' }, 'replace');
+          return;
+        }
+        setActiveCertification(cert);
+      } catch (error) {
+        console.error('[routing] load certification', error);
+        if (!cancelled) {
+          setNotificationNotice('資格の読み込みに失敗しました。');
+          navigateAppRoute({ name: 'select' }, 'replace');
+        }
+      } finally {
+        if (!cancelled) setRouteLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    session,
+    route,
+    isAdministrator,
+    adminReady,
+    activeCertification?.id,
+  ]);
+
   const handleSelect = (certification: Certification) => {
     setActiveCertification(certification);
-    setScreen('main');
+    navigateAppRoute(
+      { name: 'main', certificationId: certification.id },
+      'push',
+    );
   };
 
   const handleBack = () => {
-    setScreen('select');
     setPendingExampleId(null);
+    navigateAppRoute({ name: 'select' }, 'push');
   };
 
   const handleSignOut = async () => {
@@ -110,6 +232,15 @@ export default function App() {
     if (error) {
       console.error('[auth] signOut', error);
     }
+  };
+
+  const handleAuthenticated = () => {
+    const current = getAppRoute();
+    if (current.name === 'login') {
+      navigateAppRoute(routeFromNext(current.next), 'replace');
+      return;
+    }
+    navigateAppRoute({ name: 'select' }, 'replace');
   };
 
   const handleOpenFromNotification = useCallback(
@@ -134,7 +265,13 @@ export default function App() {
 
         if (alreadyActive && activeCertification) {
           setPendingExampleId(notification.exampleId);
-          setScreen('main');
+          navigateAppRoute(
+            {
+              name: 'main',
+              certificationId: notification.certificationId,
+            },
+            'push',
+          );
           return;
         }
 
@@ -151,7 +288,10 @@ export default function App() {
 
         setActiveCertification(cert);
         setPendingExampleId(notification.exampleId);
-        setScreen('main');
+        navigateAppRoute(
+          { name: 'main', certificationId: cert.id },
+          'push',
+        );
       } catch (error) {
         console.error('[notifications] open example', error);
         setNotificationNotice('例題を開けませんでした。');
@@ -172,7 +312,16 @@ export default function App() {
   if (!session) {
     return (
       <View style={styles.root}>
-        <AuthScreen onAuthenticated={() => undefined} />
+        <AuthScreen onAuthenticated={handleAuthenticated} />
+        <StatusBar style="dark" />
+      </View>
+    );
+  }
+
+  if (routeLoading) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color={colors.accent} size="large" />
         <StatusBar style="dark" />
       </View>
     );
@@ -180,9 +329,21 @@ export default function App() {
 
   return (
     <View style={styles.root}>
-      {screen === 'admin' ? (
-        <AdminReportsScreen onBack={() => setScreen('select')} />
-      ) : screen === 'select' || !activeCertification ? (
+      {route.name === 'admin' && isAdministrator ? (
+        <AdminReportsScreen
+          onBack={() => navigateAppRoute({ name: 'select' }, 'push')}
+        />
+      ) : route.name === 'main' && activeCertification ? (
+        <CertMainScreen
+          certification={activeCertification}
+          onBack={handleBack}
+          openExampleId={pendingExampleId}
+          onOpenExampleConsumed={() => setPendingExampleId(null)}
+          onOpenFromNotification={handleOpenFromNotification}
+          externalNotice={notificationNotice}
+          onDismissExternalNotice={() => setNotificationNotice(null)}
+        />
+      ) : (
         <View style={styles.selectWrap}>
           <View style={styles.topBar}>
             <Text style={styles.topBarEmail} numberOfLines={1}>
@@ -193,7 +354,9 @@ export default function App() {
               {isAdministrator ? (
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => setScreen('admin')}
+                  onPress={() =>
+                    navigateAppRoute({ name: 'admin' }, 'push')
+                  }
                   style={({ pressed }) => [
                     styles.adminButton,
                     pressed && styles.adminButtonPressed,
@@ -227,16 +390,6 @@ export default function App() {
           ) : null}
           <CertSelectScreen onSelect={handleSelect} />
         </View>
-      ) : (
-        <CertMainScreen
-          certification={activeCertification}
-          onBack={handleBack}
-          openExampleId={pendingExampleId}
-          onOpenExampleConsumed={() => setPendingExampleId(null)}
-          onOpenFromNotification={handleOpenFromNotification}
-          externalNotice={notificationNotice}
-          onDismissExternalNotice={() => setNotificationNotice(null)}
-        />
       )}
       <StatusBar style="dark" />
     </View>
