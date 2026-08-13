@@ -27,6 +27,7 @@ import {
   insertExampleBatchHistory,
   updateAiChatHistory,
 } from '../lib/historiesApi';
+import { ExampleReportModal } from './ExampleReportModal';
 import { colors } from '../theme/colors';
 import {
   isSelectExample,
@@ -43,6 +44,7 @@ type Props = {
   /** 1件以上。連続解答時は複数 */
   exampleIds: string[];
   certificationId: string;
+  certificationName: string;
   historyId?: string | null;
   initialMessages?: HistoryChatMessage[];
   resumeMode?: boolean;
@@ -62,6 +64,7 @@ export function ExampleSolveModal({
   visible,
   exampleIds,
   certificationId,
+  certificationName,
   historyId = null,
   initialMessages = [],
   resumeMode = false,
@@ -91,6 +94,8 @@ export function ExampleSolveModal({
   >([]);
   const [showBatchSummary, setShowBatchSummary] = useState(false);
   const [batchHistorySaved, setBatchHistorySaved] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportNotice, setReportNotice] = useState<string | null>(null);
 
   const initialMessagesRef = useRef(initialMessages);
   initialMessagesRef.current = initialMessages;
@@ -111,12 +116,16 @@ export function ExampleSolveModal({
       setBatchResults([]);
       setShowBatchSummary(false);
       setBatchHistorySaved(false);
+      setReportOpen(false);
+      setReportNotice(null);
       return;
     }
     setQueueIndex(0);
     setBatchResults(Array.from({ length: exampleIds.length }, () => null));
     setShowBatchSummary(false);
     setBatchHistorySaved(false);
+    setReportOpen(false);
+    setReportNotice(null);
   }, [visible, exampleIds.join('|')]);
 
   useEffect(() => {
@@ -740,7 +749,22 @@ export function ExampleSolveModal({
                   ? `例題を解く（${queueIndex + 1}/${queueTotal}）`
                   : '例題を解く'}
             </Text>
-            <Pressable
+            <View style={styles.headerActions}>
+              {example && !showBatchSummary && !loading && !error ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={closeLocked}
+                  onPress={() => setReportOpen(true)}
+                  style={({ pressed }) => [
+                    styles.reportHeaderButton,
+                    pressed && !closeLocked && styles.reportHeaderButtonPressed,
+                    closeLocked && styles.closeButtonDisabled,
+                  ]}
+                >
+                  <Text style={styles.reportHeaderButtonLabel}>誤りを連絡</Text>
+                </Pressable>
+              ) : null}
+              <Pressable
               accessibilityRole="button"
               accessibilityLabel="閉じる"
               disabled={closeLocked}
@@ -753,6 +777,7 @@ export function ExampleSolveModal({
             >
               <Text style={styles.closeLabel}>×</Text>
             </Pressable>
+            </View>
           </View>
 
           {loading ? (
@@ -984,6 +1009,48 @@ export function ExampleSolveModal({
           </View>
         </View>
       </Modal>
+
+      {exampleId && example ? (
+        <ExampleReportModal
+          visible={reportOpen}
+          exampleId={exampleId}
+          exampleTitle={example.title}
+          certificationId={certificationId}
+          certificationName={certificationName}
+          onClose={() => setReportOpen(false)}
+          onSubmitted={() => {
+            setReportNotice('誤り連絡を受け付けました。ありがとうございます。');
+          }}
+        />
+      ) : null}
+
+      <Modal
+        visible={reportNotice != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReportNotice(null)}
+      >
+        <View style={styles.noticeOverlay}>
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setReportNotice(null)}
+          />
+          <View style={styles.noticeCard}>
+            <Text style={styles.noticeTitle}>お知らせ</Text>
+            <Text style={styles.noticeBody}>{reportNotice}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setReportNotice(null)}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                pressed && styles.primaryButtonPressed,
+              ]}
+            >
+              <Text style={styles.primaryButtonLabel}>閉じる</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -1031,11 +1098,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 8,
+    gap: 10,
   },
   title: {
+    flex: 1,
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 20,
     color: colors.ink,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  reportHeaderButton: {
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.mist,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  reportHeaderButtonPressed: {
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
+  },
+  reportHeaderButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.inkSoft,
   },
   closeButton: {
     width: 36,

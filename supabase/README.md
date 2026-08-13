@@ -140,3 +140,25 @@ SQL Editor で `migrations/20260807160000_fix_example_delete.sql` を Run。
 （削除時の trigger 不整合修正 + `delete_example` RPC）
 
 削除すると、その例題に紐づくAIチャット履歴は再開できなくなります（履歴行自体は残ります）。
+
+## 例題内容の誤り連絡 + 管理者画面
+
+1. SQL Editor で `migrations/20260813100000_example_content_reports.sql` を Run  
+   （`users.is_administrator` / `example_content_reports` / RLS）
+2. 管理者にするユーザーを SQL で指定（クライアントからは変更不可）:
+
+```sql
+update public.users
+set is_administrator = true
+where mail_address = 'your@email.com';
+```
+
+3. アプリ
+   - 例題一覧の「誤りを連絡」、解答画面ヘッダーの「誤りを連絡」（答え合わせ前後どちらでも可）
+   - 対象（問題文／選択肢・回答／解説／その他）＋自由記述。内部に `example_id` を保存
+   - `is_administrator = true` のアカウントのみ、資格選択画面右上に「管理者」→ 問い合わせ一覧
+
+### メール通知について
+
+追加費用なしで確実な自動メール手段が未確定のため、**今回は DB 保存 + 管理者画面のみ**。  
+将来、無料枠の SMTP / 既存メール基盤が用意できたら `submitExampleContentReport` 成功後に Edge Function を接続する想定（コード内にコメントあり）。

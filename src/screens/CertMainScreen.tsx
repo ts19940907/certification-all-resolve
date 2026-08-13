@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { ExampleCreateModal } from '../components/ExampleCreateModal';
+import { ExampleReportModal } from '../components/ExampleReportModal';
 import { ExampleSolveModal } from '../components/ExampleSolveModal';
 import { deleteExample, fetchExamples, shuffleChoices } from '../lib/examplesApi';
 import { getErrorMessage } from '../lib/certificationsApi';
@@ -106,6 +107,7 @@ export function CertMainScreen({ certification, onBack }: Props) {
     useState<KeywordReviewResult | null>(null);
   const [batchHistoryDetail, setBatchHistoryDetail] =
     useState<ExampleBatchDetail | null>(null);
+  const [reportTarget, setReportTarget] = useState<ExampleSummary | null>(null);
 
   const loadExamples = useCallback(async () => {
     setExamplesLoading(true);
@@ -556,6 +558,19 @@ export function CertMainScreen({ certification, onBack }: Props) {
                       </Pressable>
                       <Pressable
                         accessibilityRole="button"
+                        onPress={() => setReportTarget(example)}
+                        style={({ pressed }) => [
+                          styles.rowAction,
+                          styles.rowActionSecondary,
+                          pressed && styles.rowActionPressed,
+                        ]}
+                      >
+                        <Text style={styles.rowActionLabelSecondary}>
+                          誤りを連絡
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
                         style={({ pressed }) => [
                           styles.rowAction,
                           styles.rowActionSecondary,
@@ -886,12 +901,25 @@ export function CertMainScreen({ certification, onBack }: Props) {
         visible={solveSession != null}
         exampleIds={solveSession?.exampleIds ?? []}
         certificationId={certification.id}
+        certificationName={certification.name}
         historyId={solveSession?.historyId ?? null}
         initialMessages={solveSession?.initialMessages ?? []}
         resumeMode={solveSession?.resumeMode ?? false}
         onClose={() => setSolveSession(null)}
         onHistoryChanged={() => {
           void loadHistories();
+        }}
+      />
+
+      <ExampleReportModal
+        visible={reportTarget != null}
+        exampleId={reportTarget?.id ?? ''}
+        exampleTitle={reportTarget?.title ?? ''}
+        certificationId={certification.id}
+        certificationName={certification.name}
+        onClose={() => setReportTarget(null)}
+        onSubmitted={() => {
+          setNoticeMessage('誤り連絡を受け付けました。ありがとうございます。');
         }}
       />
 
