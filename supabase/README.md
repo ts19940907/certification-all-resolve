@@ -218,3 +218,13 @@ node scripts/backfill-cert-analysis.mjs
    - `due_on` は端末ローカルのカレンダー日付で判定
    - 例題削除時は紐づくカードも削除（`ON DELETE CASCADE`）
    - 過去データの自動バックフィルはなし（これから正解・A/B したものだけ）
+
+## 設定画面（メール／パスワード／試験後ダイアログ）
+
+1. SQL Editor で `migrations/20260814090000_user_settings.sql` を Run  
+   （`users.prompt_bank_import_after_exam` / Auth メール変更時の `mail_address` 同期）
+2. アプリ
+   - 資格選択画面上部「設定」→ `/settings`
+   - 共有バンク: 試験後の取り込み確認ダイアログ ON/OFF（既定 ON）
+   - メール変更: 許可リスト内のみ。確認メールのリンクで確定
+   - パスワード変更: 現在のパスワード再認証後に更新

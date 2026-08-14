@@ -60,6 +60,7 @@ import type { UserNotification } from '../types/notification';
 type Props = {
   certification: Certification;
   onBack: () => void;
+  onOpenSettings?: () => void;
   openExampleId?: string | null;
   onOpenExampleConsumed?: () => void;
   onOpenFromNotification?: (notification: UserNotification) => void;
@@ -103,6 +104,7 @@ function gradeAccent(grade: UnderstandingGrade): string {
 export function CertMainScreen({
   certification,
   onBack,
+  onOpenSettings,
   openExampleId = null,
   onOpenExampleConsumed,
   onOpenFromNotification,
@@ -546,6 +548,18 @@ export function CertMainScreen({
               >
                 <Text style={styles.analysisButtonLabel}>分析</Text>
               </Pressable>
+              {onOpenSettings ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={onOpenSettings}
+                  style={({ pressed }) => [
+                    styles.settingsButton,
+                    pressed && styles.settingsButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.settingsButtonLabel}>設定</Text>
+                </Pressable>
+              ) : null}
               {onOpenFromNotification ? (
                 <NotificationBell onOpenExample={onOpenFromNotification} />
               ) : null}
@@ -603,6 +617,18 @@ export function CertMainScreen({
               >
                 <Text style={styles.analysisButtonLabel}>分析</Text>
               </Pressable>
+              {onOpenSettings ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={onOpenSettings}
+                  style={({ pressed }) => [
+                    styles.settingsButton,
+                    pressed && styles.settingsButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.settingsButtonLabel}>設定</Text>
+                </Pressable>
+              ) : null}
               {onOpenFromNotification ? (
                 <NotificationBell onOpenExample={onOpenFromNotification} />
               ) : null}
@@ -1421,6 +1447,25 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   analysisButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.accentDeep,
+  },
+  settingsButton: {
+    minHeight: 42,
+    borderRadius: 12,
+    backgroundColor: colors.paper,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  settingsButtonPressed: {
+    backgroundColor: colors.accentSoft,
+  },
+  settingsButtonLabel: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 14,
     color: colors.accentDeep,

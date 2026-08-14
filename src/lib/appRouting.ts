@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 export type AppRoute =
   | { name: 'login'; next?: string }
   | { name: 'select' }
+  | { name: 'settings'; certificationId?: string }
   | { name: 'admin' }
   | { name: 'main'; certificationId: string };
 
@@ -90,6 +91,16 @@ export function parseAppRoute(
   if (normalized === '/admin') {
     return { name: 'admin' };
   }
+  if (normalized === '/settings') {
+    return { name: 'settings' };
+  }
+  const certSettingsMatch = normalized.match(/^\/certs\/([^/]+)\/settings$/);
+  if (certSettingsMatch?.[1]) {
+    return {
+      name: 'settings',
+      certificationId: decodeURIComponent(certSettingsMatch[1]),
+    };
+  }
   const certMatch = normalized.match(/^\/certs\/([^/]+)$/);
   if (certMatch?.[1]) {
     return { name: 'main', certificationId: decodeURIComponent(certMatch[1]) };
@@ -110,6 +121,10 @@ export function pathForRoute(route: AppRoute): string {
     }
     case 'admin':
       return '/admin';
+    case 'settings':
+      return route.certificationId
+        ? `/certs/${encodeURIComponent(route.certificationId)}/settings`
+        : '/settings';
     case 'main':
       return `/certs/${encodeURIComponent(route.certificationId)}`;
     case 'select':

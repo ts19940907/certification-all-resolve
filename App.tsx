@@ -30,6 +30,7 @@ import { AuthScreen } from './src/screens/AuthScreen';
 import { AdminReportsScreen } from './src/screens/AdminReportsScreen';
 import { CertMainScreen } from './src/screens/CertMainScreen';
 import { CertSelectScreen } from './src/screens/CertSelectScreen';
+import { CertSettingScreen } from './src/screens/CertSettingScreen';
 import { colors } from './src/theme/colors';
 import type { Certification } from './src/types/certification';
 import type { UserNotification } from './src/types/notification';
@@ -166,6 +167,52 @@ export default function App() {
 
     if (route.name === 'select') {
       setActiveCertification(null);
+      setRouteLoading(false);
+      return;
+    }
+
+    if (route.name === 'settings') {
+      if (!route.certificationId) {
+        setActiveCertification(null);
+        setRouteLoading(false);
+        return;
+      }
+
+      if (activeCertification?.id === route.certificationId) {
+        setRouteLoading(false);
+        return;
+      }
+
+      let cancelled = false;
+      setRouteLoading(true);
+      void (async () => {
+        try {
+          const certs = await fetchCertifications();
+          if (cancelled) return;
+          const cert = certs.find((item) => item.id === route.certificationId);
+          if (!cert) {
+            setActiveCertification(null);
+            navigateAppRoute({ name: 'settings' }, 'replace');
+            return;
+          }
+          setActiveCertification(cert);
+        } catch (error) {
+          console.error('[routing] load certification for settings', error);
+          if (!cancelled) {
+            setActiveCertification(null);
+            navigateAppRoute({ name: 'settings' }, 'replace');
+          }
+        } finally {
+          if (!cancelled) setRouteLoading(false);
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (route.name !== 'main') {
       setRouteLoading(false);
       return;
     }
@@ -333,10 +380,34 @@ export default function App() {
         <AdminReportsScreen
           onBack={() => navigateAppRoute({ name: 'select' }, 'push')}
         />
+      ) : route.name === 'settings' ? (
+        <CertSettingScreen
+          showSignOut={Boolean(route.certificationId)}
+          onSignOut={handleSignOut}
+          onBack={() => {
+            if (route.certificationId) {
+              navigateAppRoute(
+                { name: 'main', certificationId: route.certificationId },
+                'push',
+              );
+              return;
+            }
+            navigateAppRoute({ name: 'select' }, 'push');
+          }}
+        />
       ) : route.name === 'main' && activeCertification ? (
         <CertMainScreen
           certification={activeCertification}
           onBack={handleBack}
+          onOpenSettings={() =>
+            navigateAppRoute(
+              {
+                name: 'settings',
+                certificationId: activeCertification.id,
+              },
+              'push',
+            )
+          }
           openExampleId={pendingExampleId}
           onOpenExampleConsumed={() => setPendingExampleId(null)}
           onOpenFromNotification={handleOpenFromNotification}
@@ -351,6 +422,18 @@ export default function App() {
             </Text>
             <View style={styles.topBarActions}>
               <NotificationBell onOpenExample={handleOpenFromNotification} />
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  navigateAppRoute({ name: 'settings' }, 'push')
+                }
+                style={({ pressed }) => [
+                  styles.settingsButton,
+                  pressed && styles.settingsButtonPressed,
+                ]}
+              >
+                <Text style={styles.settingsButtonLabel}>設定</Text>
+              </Pressable>
               {isAdministrator ? (
                 <Pressable
                   accessibilityRole="button"
@@ -430,6 +513,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  settingsButton: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.paper,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  settingsButtonPressed: {
+    backgroundColor: colors.accentSoft,
+  },
+  settingsButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.accentDeep,
   },
   adminButton: {
     borderRadius: 10,
