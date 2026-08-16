@@ -88,10 +88,35 @@ function parseExampleBatchDetail(raw: unknown): ExampleBatchDetail | null {
     const row = item as Record<string, unknown>;
     const exampleId = String(row.example_id ?? '').trim();
     if (!exampleId) continue;
+    const selectedIdsRaw = Array.isArray(row.selected_ids)
+      ? row.selected_ids
+      : [];
+    const selectedIds = selectedIdsRaw
+      .map((id) => String(id ?? '').trim())
+      .filter(Boolean);
+    const selectedLabelsRaw = Array.isArray(row.selected_labels)
+      ? row.selected_labels
+      : [];
+    const selectedLabels = selectedLabelsRaw
+      .map((label) => String(label ?? '').trim())
+      .filter(Boolean);
+    const correctLabelsRaw = Array.isArray(row.correct_labels)
+      ? row.correct_labels
+      : [];
+    const correctLabels = correctLabelsRaw
+      .map((label) => String(label ?? '').trim())
+      .filter(Boolean);
+    const descriptiveAnswer = String(row.descriptive_answer ?? '').trim();
     results.push({
       example_id: exampleId,
       title: String(row.title ?? '').trim() || '無題の例題',
       correct: Boolean(row.correct),
+      ...(selectedIds.length > 0 ? { selected_ids: selectedIds } : {}),
+      ...(selectedLabels.length > 0 ? { selected_labels: selectedLabels } : {}),
+      ...(correctLabels.length > 0 ? { correct_labels: correctLabels } : {}),
+      ...(descriptiveAnswer
+        ? { descriptive_answer: descriptiveAnswer }
+        : {}),
     });
   }
   const total = Number(obj.total);
@@ -344,6 +369,15 @@ export async function exampleExists(exampleId: string): Promise<boolean> {
   }
 
   return data != null;
+}
+
+export async function deleteHistory(historyId: string): Promise<void> {
+  const { error } = await supabase.from('histories').delete().eq('id', historyId);
+
+  if (error) {
+    console.error('[histories] delete', error);
+    throw error;
+  }
 }
 
 export function getHistoryErrorMessage(error: unknown, fallback: string) {

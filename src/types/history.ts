@@ -23,6 +23,14 @@ export type ExampleBatchResultItem = {
   example_id: string;
   title: string;
   correct: boolean;
+  /** 選択式で選んだ choice id（履歴からの復元用） */
+  selected_ids?: string[];
+  /** 選択式で選んだラベル（A, B など。一覧表示用） */
+  selected_labels?: string[];
+  /** 正解ラベル（一覧での対比表示用） */
+  correct_labels?: string[];
+  /** 記述式の入力内容 */
+  descriptive_answer?: string;
 };
 
 export type ExampleBatchDetail = {

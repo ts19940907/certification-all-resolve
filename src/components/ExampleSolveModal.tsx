@@ -49,6 +49,15 @@ type Props = {
   historyId?: string | null;
   initialMessages?: HistoryChatMessage[];
   resumeMode?: boolean;
+  /**
+   * 実施履歴から解説・AIチャットを開くモード。
+   * 解答後画面相当（解説表示、AIチャット可）。チャットは初期閉。
+   */
+  reviewMode?: boolean;
+  /** reviewMode 時に復元する選択（choice id） */
+  initialSelectedIds?: string[];
+  /** reviewMode 時に復元する記述解答 */
+  initialDescriptiveAnswer?: string;
   /** 本番試験モード（表示文言・制限時間用） */
   examMode?: boolean;
   /** 制限時間（秒）。指定時のみカウントダウン */
@@ -86,6 +95,9 @@ export function ExampleSolveModal({
   historyId = null,
   initialMessages = [],
   resumeMode = false,
+  reviewMode = false,
+  initialSelectedIds = [],
+  initialDescriptiveAnswer = '',
   examMode = false,
   timeLimitSeconds = null,
   onClose,
@@ -129,6 +141,12 @@ export function ExampleSolveModal({
   initialMessagesRef.current = initialMessages;
   const resumeModeRef = useRef(resumeMode);
   resumeModeRef.current = resumeMode;
+  const reviewModeRef = useRef(reviewMode);
+  reviewModeRef.current = reviewMode;
+  const initialSelectedIdsRef = useRef(initialSelectedIds);
+  initialSelectedIdsRef.current = initialSelectedIds;
+  const initialDescriptiveAnswerRef = useRef(initialDescriptiveAnswer);
+  initialDescriptiveAnswerRef.current = initialDescriptiveAnswer;
   const historyIdRef = useRef(historyId);
   historyIdRef.current = historyId;
   const batchResultsRef = useRef(batchResults);
@@ -154,8 +172,9 @@ export function ExampleSolveModal({
 
   const exampleId = exampleIds[queueIndex] ?? null;
   const queueTotal = exampleIds.length;
-  const hasNext = !resumeMode && queueIndex < queueTotal - 1;
-  const isBatch = !resumeMode && queueTotal > 1;
+  const isHistoryView = resumeMode || reviewMode;
+  const hasNext = !isHistoryView && queueIndex < queueTotal - 1;
+  const isBatch = !isHistoryView && queueTotal > 1;
   const isLastInBatch = isBatch && !hasNext;
 
   useEffect(() => {
@@ -238,8 +257,12 @@ export function ExampleSolveModal({
     setNotice(null);
 
     const isFirstInSession = queueIndex === 0;
-    const shouldResume = isFirstInSession && resumeModeRef.current && !examMode;
-    setRevealed(shouldResume);
+    const shouldResume =
+      isFirstInSession && resumeModeRef.current && !examMode;
+    const shouldReview =
+      isFirstInSession && reviewModeRef.current && !examMode;
+    const historyView = shouldResume || shouldReview;
+    setRevealed(historyView);
     setChatOpen(shouldResume);
     setChatMessages(shouldResume ? [...initialMessagesRef.current] : []);
     setActiveHistoryId(shouldResume ? historyIdRef.current : null);
@@ -257,7 +280,7 @@ export function ExampleSolveModal({
         if (cached) {
           labeled = cached;
         } else {
-          const baseChoices = shouldResume
+          const baseChoices = historyView
             ? detail.choices
             : shuffleChoices(detail.choices);
           labeled = baseChoices.map((choice, index) => ({
@@ -275,6 +298,12 @@ export function ExampleSolveModal({
           setSelectedIds(draft?.selectedIds ?? []);
           setDescriptiveDraft(draft?.descriptiveDraft ?? '');
           setRevealed(false);
+        } else if (shouldReview) {
+          const savedIds = initialSelectedIdsRef.current.filter((id) =>
+            labeled.some((c) => c.id === id),
+          );
+          setSelectedIds(savedIds);
+          setDescriptiveDraft(initialDescriptiveAnswerRef.current);
         } else if (shouldResume) {
           setSelectedIds(labeled.filter((c) => c.isAnswer).map((c) => c.id));
         }
@@ -354,12 +383,27 @@ export function ExampleSolveModal({
     if (!canCheck || !example || !exampleId) return;
     const correct = evaluateCurrentAnswer();
     if (isBatch) {
+      const correctChoiceLabels = choices
+        .filter((c) => c.isAnswer)
+        .map((c) => c.label);
+      const selectedLabels = choices
+        .filter((c) => selectedIds.includes(c.id))
+        .map((c) => c.label);
       setBatchResults((prev) => {
         const next = [...prev];
         next[queueIndex] = {
           example_id: exampleId,
           title: example.title || '無題の例題',
           correct,
+          ...(isSelect
+            ? {
+                selected_ids: [...selectedIds],
+                selected_labels: selectedLabels,
+                correct_labels: correctChoiceLabels,
+              }
+            : {
+                descriptive_answer: descriptiveDraft.trim(),
+              }),
         };
         return next;
       });
@@ -428,10 +472,25 @@ export function ExampleSolveModal({
           desc.trim().replace(/\s+/g, '') ===
           ex.answer.trim().replace(/\s+/g, '');
       }
+      const correctChoiceLabels = ch
+        .filter((c) => c.isAnswer)
+        .map((c) => c.label);
+      const selectedLabels = ch
+        .filter((c) => ids.includes(c.id))
+        .map((c) => c.label);
       result = {
         example_id: id,
         title: ex.title || '無題の例題',
         correct,
+        ...(select
+          ? {
+              selected_ids: [...ids],
+              selected_labels: selectedLabels,
+              correct_labels: correctChoiceLabels,
+            }
+          : {
+              descriptive_answer: desc.trim(),
+            }),
       };
     }
 
@@ -471,10 +530,17 @@ export function ExampleSolveModal({
     return exampleIds.map((id, index) => {
       const existing = batchResultsRef.current[index];
       if (existing != null) return existing;
+      const draft = examDraftsRef.current[index];
       return {
         example_id: id,
-        title: examDraftsRef.current[index] ? '解答済み' : '未解答',
+        title: draft ? '解答済み' : '未解答',
         correct: false,
+        ...(draft?.selectedIds?.length
+          ? { selected_ids: [...draft.selectedIds] }
+          : {}),
+        ...(draft?.descriptiveDraft?.trim()
+          ? { descriptive_answer: draft.descriptiveDraft.trim() }
+          : {}),
       };
     });
   };

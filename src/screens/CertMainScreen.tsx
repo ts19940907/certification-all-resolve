@@ -35,6 +35,7 @@ import {
   runExamBankFullGeneration,
 } from '../lib/examBankApi';
 import {
+  deleteHistory,
   exampleExists,
   fetchHistories,
   getHistoryErrorMessage,
@@ -55,6 +56,7 @@ import type { Certification } from '../types/certification';
 import type { ExampleSummary } from '../types/example';
 import type {
   ExampleBatchDetail,
+  ExampleBatchResultItem,
   HistoryChatMessage,
   HistorySummary,
 } from '../types/history';
@@ -82,6 +84,9 @@ type SolveSession = {
   historyId: string | null;
   initialMessages: HistoryChatMessage[];
   resumeMode: boolean;
+  reviewMode?: boolean;
+  initialSelectedIds?: string[];
+  initialDescriptiveAnswer?: string;
   examMode?: boolean;
   timeLimitSeconds?: number | null;
 };
@@ -134,6 +139,9 @@ export function CertMainScreen({
   const [solveSession, setSolveSession] = useState<SolveSession | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ExampleSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [historyDeleteTarget, setHistoryDeleteTarget] =
+    useState<HistorySummary | null>(null);
+  const [historyDeleteBusy, setHistoryDeleteBusy] = useState(false);
   const [examBankConfirmOpen, setExamBankConfirmOpen] = useState(false);
   const [examRebalanceConfirmOpen, setExamRebalanceConfirmOpen] = useState(false);
   const [examBankBusy, setExamBankBusy] = useState(false);
@@ -158,6 +166,8 @@ export function CertMainScreen({
     useState<KeywordReviewResult | null>(null);
   const [batchHistoryDetail, setBatchHistoryDetail] =
     useState<ExampleBatchDetail | null>(null);
+  const [batchHistoryKind, setBatchHistoryKind] = useState<string | null>(null);
+  const [batchHistoryId, setBatchHistoryId] = useState<string | null>(null);
   const [reportTarget, setReportTarget] = useState<ExampleSummary | null>(null);
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [categoryMasterOpen, setCategoryMasterOpen] = useState(false);
@@ -332,7 +342,74 @@ export function CertMainScreen({
       historyId: null,
       initialMessages: [],
       resumeMode: false,
+      reviewMode: false,
     });
+  };
+
+  const openExampleFromBatchHistory = async (exampleId: string) => {
+    try {
+      const exists = await exampleExists(exampleId);
+      if (!exists) {
+        setNoticeMessage(
+          'この例題は削除されているため、開けません。',
+        );
+        return;
+      }
+      openSolve(exampleId);
+    } catch (error) {
+      setNoticeMessage(
+        getHistoryErrorMessage(error, '例題を開けませんでした。'),
+      );
+    }
+  };
+
+  const openReviewFromBatchHistory = async (item: ExampleBatchResultItem) => {
+    try {
+      const exists = await exampleExists(item.example_id);
+      if (!exists) {
+        setNoticeMessage(
+          'この例題は削除されているため、解説を開けません。',
+        );
+        return;
+      }
+      setSolveSession({
+        exampleIds: [item.example_id],
+        historyId: null,
+        initialMessages: [],
+        resumeMode: false,
+        reviewMode: true,
+        initialSelectedIds: item.selected_ids ?? [],
+        initialDescriptiveAnswer: item.descriptive_answer ?? '',
+      });
+    } catch (error) {
+      setNoticeMessage(
+        getHistoryErrorMessage(error, '解説を開けませんでした。'),
+      );
+    }
+  };
+
+  const formatBatchAnswerSummary = (item: ExampleBatchResultItem) => {
+    if (item.selected_labels && item.selected_labels.length > 0) {
+      const selected = item.selected_labels.join(', ');
+      const correct =
+        item.correct_labels && item.correct_labels.length > 0
+          ? item.correct_labels.join(', ')
+          : null;
+      if (item.correct) {
+        return `あなたの解答: ${selected}`;
+      }
+      return correct
+        ? `あなたの解答: ${selected} ／ 正解: ${correct}`
+        : `あなたの解答: ${selected}`;
+    }
+    if (item.descriptive_answer) {
+      const text =
+        item.descriptive_answer.length > 80
+          ? `${item.descriptive_answer.slice(0, 80)}…`
+          : item.descriptive_answer;
+      return `あなたの解答: ${text}`;
+    }
+    return null;
   };
 
   const openExamLobby = async () => {
@@ -533,23 +610,6 @@ export function CertMainScreen({
     };
   }, [openExampleId, examplesLoading, onOpenExampleConsumed]);
 
-  const openExampleFromBatchHistory = async (exampleId: string) => {
-    try {
-      const exists = await exampleExists(exampleId);
-      if (!exists) {
-        setNoticeMessage(
-          'この例題は削除されているため、開けません。',
-        );
-        return;
-      }
-      openSolve(exampleId);
-    } catch (error) {
-      setNoticeMessage(
-        getHistoryErrorMessage(error, '例題を開けませんでした。'),
-      );
-    }
-  };
-
   const openBatchSolve = async () => {
     if (!canStartBatch || batchPickBusy) {
       if (!canStartBatch) {
@@ -599,6 +659,8 @@ export function CertMainScreen({
 
     if (isExampleBatchDetail(item.detail, item.kind)) {
       setBatchHistoryDetail(item.detail);
+      setBatchHistoryKind(item.kind);
+      setBatchHistoryId(item.id);
       setSessionCategoryStats([]);
       try {
         const [cats, map] = await Promise.all([
@@ -699,6 +761,34 @@ export function CertMainScreen({
       );
     } finally {
       setDeleteBusy(false);
+    }
+  };
+
+  const handleHistoryDeleteConfirm = async () => {
+    if (!historyDeleteTarget || historyDeleteBusy) return;
+    setHistoryDeleteBusy(true);
+    try {
+      const deletedId = historyDeleteTarget.id;
+      await deleteHistory(deletedId);
+      if (batchHistoryId === deletedId) {
+        setBatchHistoryDetail(null);
+        setBatchHistoryKind(null);
+        setBatchHistoryId(null);
+        setSessionCategoryStats([]);
+      }
+      setHistoryDeleteTarget(null);
+      await loadHistories();
+    } catch (error) {
+      console.error('[CertMainScreen] history delete', error);
+      setHistoryDeleteTarget(null);
+      setNoticeMessage(
+        getHistoryErrorMessage(
+          error,
+          '実施履歴の削除に失敗しました。時間をおいて再度お試しください。',
+        ),
+      );
+    } finally {
+      setHistoryDeleteBusy(false);
     }
   };
 
@@ -937,18 +1027,30 @@ export function CertMainScreen({
                       </Text>
                       <Text style={styles.historySummary}>{item.summary}</Text>
                     </View>
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => {
-                        void openHistoryDetail(item);
-                      }}
-                      style={({ pressed }) => [
-                        styles.historyDetailButton,
-                        pressed && styles.historyDetailButtonPressed,
-                      ]}
-                    >
-                      <Text style={styles.historyDetailButtonLabel}>詳細</Text>
-                    </Pressable>
+                    <View style={styles.historyActions}>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => {
+                          void openHistoryDetail(item);
+                        }}
+                        style={({ pressed }) => [
+                          styles.historyDetailButton,
+                          pressed && styles.historyDetailButtonPressed,
+                        ]}
+                      >
+                        <Text style={styles.historyDetailButtonLabel}>詳細</Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => setHistoryDeleteTarget(item)}
+                        style={({ pressed }) => [
+                          styles.historyDeleteButton,
+                          pressed && styles.historyDeleteButtonPressed,
+                        ]}
+                      >
+                        <Text style={styles.historyDeleteButtonLabel}>削除</Text>
+                      </Pressable>
+                    </View>
                   </View>
                 ))
               )}
@@ -1428,6 +1530,60 @@ export function CertMainScreen({
       </Modal>
 
       <Modal
+        visible={historyDeleteTarget != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!historyDeleteBusy) setHistoryDeleteTarget(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => {
+              if (!historyDeleteBusy) setHistoryDeleteTarget(null);
+            }}
+          />
+          <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
+            <Text style={styles.modalTitle}>実施履歴を削除しますか？</Text>
+            <Text style={styles.modalLead}>
+              「{historyDeleteTarget?.title}」を削除します。この操作は取り消せません。
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={historyDeleteBusy}
+                onPress={() => setHistoryDeleteTarget(null)}
+                style={({ pressed }) => [
+                  styles.modalSecondaryButton,
+                  pressed && styles.modalSecondaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.modalSecondaryButtonLabel}>キャンセル</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={historyDeleteBusy}
+                onPress={() => {
+                  void handleHistoryDeleteConfirm();
+                }}
+                style={({ pressed }) => [
+                  styles.modalDangerButton,
+                  pressed && styles.modalDangerButtonPressed,
+                ]}
+              >
+                {historyDeleteBusy ? (
+                  <ActivityIndicator color={colors.paper} />
+                ) : (
+                  <Text style={styles.modalDangerButtonLabel}>削除する</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={keywordReviewResult != null}
         transparent
         animationType="fade"
@@ -1511,12 +1667,20 @@ export function CertMainScreen({
         visible={batchHistoryDetail != null}
         transparent
         animationType="fade"
-        onRequestClose={() => setBatchHistoryDetail(null)}
+        onRequestClose={() => {
+          setBatchHistoryDetail(null);
+          setBatchHistoryKind(null);
+          setBatchHistoryId(null);
+        }}
       >
         <View style={styles.modalOverlay}>
           <Pressable
             style={styles.modalBackdrop}
-            onPress={() => setBatchHistoryDetail(null)}
+            onPress={() => {
+              setBatchHistoryDetail(null);
+              setBatchHistoryKind(null);
+              setBatchHistoryId(null);
+            }}
           />
           <View
             style={[
@@ -1525,7 +1689,11 @@ export function CertMainScreen({
               isWide && styles.modalCardWide,
             ]}
           >
-            <Text style={styles.modalTitle}>まとめて解いた結果</Text>
+            <Text style={styles.modalTitle}>
+              {batchHistoryKind === 'exam'
+                ? '本番試験の結果'
+                : 'まとめて解いた結果'}
+            </Text>
             {batchHistoryDetail ? (
               <ScrollView
                 style={styles.reviewResultScroll}
@@ -1558,7 +1726,9 @@ export function CertMainScreen({
                     />
                   </View>
                 ) : null}
-                {batchHistoryDetail.results.map((item, index) => (
+                {batchHistoryDetail.results.map((item, index) => {
+                  const answerSummary = formatBatchAnswerSummary(item);
+                  return (
                   <View key={`${item.example_id}-${index}`} style={styles.batchResultRow}>
                     <View style={styles.batchResultMain}>
                       <Text style={styles.batchResultIndex}>第{index + 1}問</Text>
@@ -1576,6 +1746,13 @@ export function CertMainScreen({
                         >
                           {item.correct ? '正解' : '不正解'}
                         </Text>
+                      </View>
+                      {answerSummary ? (
+                        <Text style={styles.batchAnswerSummary} numberOfLines={3}>
+                          {answerSummary}
+                        </Text>
+                      ) : null}
+                      <View style={styles.batchResultActions}>
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel={`${item.title}を開く`}
@@ -1591,10 +1768,26 @@ export function CertMainScreen({
                             この問題を開く
                           </Text>
                         </Pressable>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${item.title}の解説を見る`}
+                          onPress={() => {
+                            void openReviewFromBatchHistory(item);
+                          }}
+                          style={({ pressed }) => [
+                            styles.batchReviewButton,
+                            pressed && styles.batchReviewButtonPressed,
+                          ]}
+                        >
+                          <Text style={styles.batchReviewButtonLabel}>
+                            解説を見る
+                          </Text>
+                        </Pressable>
                       </View>
                     </View>
                   </View>
-                ))}
+                  );
+                })}
               </ScrollView>
             ) : null}
             <View style={styles.modalActions}>
@@ -1602,6 +1795,8 @@ export function CertMainScreen({
                 accessibilityRole="button"
                 onPress={() => {
                   setBatchHistoryDetail(null);
+                  setBatchHistoryKind(null);
+                  setBatchHistoryId(null);
                   setSessionCategoryStats([]);
                 }}
                 style={({ pressed }) => [
@@ -1664,6 +1859,11 @@ export function CertMainScreen({
         historyId={solveSession?.historyId ?? null}
         initialMessages={solveSession?.initialMessages ?? []}
         resumeMode={solveSession?.resumeMode ?? false}
+        reviewMode={solveSession?.reviewMode ?? false}
+        initialSelectedIds={solveSession?.initialSelectedIds ?? []}
+        initialDescriptiveAnswer={
+          solveSession?.initialDescriptiveAnswer ?? ''
+        }
         examMode={solveSession?.examMode ?? false}
         timeLimitSeconds={solveSession?.timeLimitSeconds ?? null}
         onClose={() => {
@@ -2294,6 +2494,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.inkSoft,
   },
+  historyActions: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 8,
+  },
+  historyDeleteButton: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.spotlight,
+    backgroundColor: colors.paper,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  historyDeleteButtonPressed: {
+    backgroundColor: '#F8E8E6',
+  },
+  historyDeleteButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.spotlight,
+    textAlign: 'center',
+  },
   exampleRow: {
     borderWidth: 1,
     borderColor: colors.line,
@@ -2527,6 +2749,19 @@ const styles = StyleSheet.create({
   batchResultWrong: {
     color: colors.spotlight,
   },
+  batchAnswerSummary: {
+    marginTop: 4,
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 12,
+    color: colors.inkSoft,
+    lineHeight: 18,
+  },
+  batchResultActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
   batchOpenButton: {
     borderRadius: 8,
     borderWidth: 1.5,
@@ -2542,6 +2777,23 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 12,
     color: colors.accentDeep,
+  },
+  batchReviewButton: {
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  batchReviewButtonPressed: {
+    backgroundColor: colors.mist,
+    borderColor: colors.accent,
+  },
+  batchReviewButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.inkSoft,
   },
   modalOverlay: {
     flex: 1,
