@@ -3,7 +3,8 @@ import type { KeywordReviewResult } from './keywordReview';
 export type HistoryKind =
   | 'example_ai_chat'
   | 'keyword_review'
-  | 'example_batch';
+  | 'example_batch'
+  | 'exam';
 
 export type HistoryChatMessage = {
   id: string;
@@ -74,7 +75,7 @@ export function isExampleBatchDetail(
   kind: string,
 ): detail is ExampleBatchDetail {
   return (
-    kind === 'example_batch' &&
+    (kind === 'example_batch' || kind === 'exam') &&
     detail != null &&
     'total' in detail &&
     'correct_count' in detail &&

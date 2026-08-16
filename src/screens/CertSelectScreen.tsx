@@ -121,7 +121,7 @@ export function CertSelectScreen({ onSelect }: Props) {
       const allowed = await canRenameCertification(cert.id);
       if (!allowed) {
         setNoticeMessage(
-          '例題または履歴がある資格は改名できません。中身を空にすると改名できます。',
+          '例題・履歴がある、共有バンクがある、または他のユーザーが利用中の資格は改名できません。',
         );
         return;
       }

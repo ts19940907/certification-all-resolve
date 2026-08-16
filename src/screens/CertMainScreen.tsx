@@ -13,6 +13,7 @@ import {
 import { ExampleCreateModal } from '../components/ExampleCreateModal';
 import { ExampleReportModal } from '../components/ExampleReportModal';
 import { ExampleSolveModal } from '../components/ExampleSolveModal';
+import { ExamStartModal } from '../components/ExamStartModal';
 import { AnalysisModal } from '../components/AnalysisModal';
 import { CategoryMasterModal } from '../components/CategoryMasterModal';
 import { CategoryRadarChart } from '../components/CategoryRadarChart';
@@ -23,9 +24,16 @@ import {
   fetchCertificationCategories,
   fetchExampleCategoryMap,
 } from '../lib/analysisApi';
-import { deleteExample, fetchExamples } from '../lib/examplesApi';
+import { deleteExample, fetchExamples, filterUnimportedBankExampleIds, importBankExamplesToLibrary } from '../lib/examplesApi';
 import { pickBatchExampleIds } from '../lib/batchPick';
 import { getErrorMessage } from '../lib/certificationsApi';
+import {
+  fetchBankExampleIdsForExam,
+  fetchExamBankStatus,
+  getExamBankErrorMessage,
+  rebalanceExamBankForMulti,
+  runExamBankFullGeneration,
+} from '../lib/examBankApi';
 import {
   exampleExists,
   fetchHistories,
@@ -37,6 +45,7 @@ import {
   reviewKeyword,
 } from '../lib/keywordReviewApi';
 import { fetchDueSrsCount, upsertKeywordSrsCard } from '../lib/srsApi';
+import { fetchUserSettings } from '../lib/userSettingsApi';
 import { colors } from '../theme/colors';
 import type {
   CategoryUnderstanding,
@@ -73,11 +82,15 @@ type SolveSession = {
   historyId: string | null;
   initialMessages: HistoryChatMessage[];
   resumeMode: boolean;
+  examMode?: boolean;
+  timeLimitSeconds?: number | null;
 };
 
 const MIN_QUESTION_COUNT = 10;
 const MAX_QUESTION_COUNT = 25;
 const DEFAULT_QUESTION_COUNT = 10;
+const EXAM_QUESTION_COUNT = 75;
+const EXAM_TIME_LIMIT_MINUTES = 180;
 
 function clampQuestionCount(value: number, available: number) {
   const maxAllowed = Math.min(MAX_QUESTION_COUNT, Math.max(0, available));
@@ -121,6 +134,16 @@ export function CertMainScreen({
   const [solveSession, setSolveSession] = useState<SolveSession | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ExampleSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [examBankConfirmOpen, setExamBankConfirmOpen] = useState(false);
+  const [examRebalanceConfirmOpen, setExamRebalanceConfirmOpen] = useState(false);
+  const [examBankBusy, setExamBankBusy] = useState(false);
+  const [examBankProgressText, setExamBankProgressText] = useState<string | null>(
+    null,
+  );
+  const [examLobbyIds, setExamLobbyIds] = useState<string[] | null>(null);
+  const [examLobbyBusy, setExamLobbyBusy] = useState(false);
+  const [bankImportIds, setBankImportIds] = useState<string[] | null>(null);
+  const [bankImportBusy, setBankImportBusy] = useState(false);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [examples, setExamples] = useState<ExampleSummary[]>([]);
   const [examplesError, setExamplesError] = useState<string | null>(null);
@@ -247,6 +270,62 @@ export function CertMainScreen({
     });
   }, [availableCount, examplesLoading, maxSelectableCount]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        // 既存バンク問題の category_id 埋め（status 呼び出し側で実施）
+        await fetchExamBankStatus(certification.id);
+        if (cancelled) return;
+      } catch {
+        // パイロット対象外の資格などでは無視
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [certification.id]);
+
+  const handleExamFinished = async (payload: { exampleIds: string[] }) => {
+    try {
+      const settings = await fetchUserSettings();
+      if (!settings.promptBankImportAfterExam) return;
+      const unimported = await filterUnimportedBankExampleIds(payload.exampleIds);
+      if (unimported.length === 0) {
+        setNoticeMessage(
+          '試験で出た共有バンク問題は、すでに例題一覧へ取り込まれています。',
+        );
+        return;
+      }
+      setBankImportIds(unimported);
+    } catch (error) {
+      setNoticeMessage(
+        getErrorMessage(error, '取り込み確認の準備に失敗しました。'),
+      );
+    }
+  };
+
+  const handleConfirmBankImport = async () => {
+    if (!bankImportIds || bankImportBusy) return;
+    setBankImportBusy(true);
+    try {
+      const imported = await importBankExamplesToLibrary(bankImportIds);
+      setBankImportIds(null);
+      await loadExamples();
+      setNoticeMessage(
+        imported > 0
+          ? `共有バンクから ${imported} 問を例題一覧に取り込みました。`
+          : '取り込める未登録の問題はありませんでした。',
+      );
+    } catch (error) {
+      setNoticeMessage(
+        getErrorMessage(error, '共有バンクの取り込みに失敗しました。'),
+      );
+    } finally {
+      setBankImportBusy(false);
+    }
+  };
+
   const openSolve = (exampleId: string) => {
     setSolveSession({
       exampleIds: [exampleId],
@@ -254,6 +333,175 @@ export function CertMainScreen({
       initialMessages: [],
       resumeMode: false,
     });
+  };
+
+  const openExamLobby = async () => {
+    try {
+      const ids = await fetchBankExampleIdsForExam(
+        certification.id,
+        EXAM_QUESTION_COUNT,
+      );
+      if (ids.length === 0) {
+        setNoticeMessage('共有バンクに問題がありません。');
+        return;
+      }
+      setExamLobbyIds(ids);
+    } catch (error) {
+      setNoticeMessage(
+        getExamBankErrorMessage(error, '試験の準備に失敗しました。'),
+      );
+    }
+  };
+
+  const handleStartExam = () => {
+    if (!examLobbyIds || examLobbyIds.length === 0 || examLobbyBusy) return;
+    setExamLobbyBusy(true);
+    try {
+      setSolveSession({
+        exampleIds: examLobbyIds,
+        historyId: null,
+        initialMessages: [],
+        resumeMode: false,
+        examMode: true,
+        timeLimitSeconds: EXAM_TIME_LIMIT_MINUTES * 60,
+      });
+      setExamLobbyIds(null);
+    } finally {
+      setExamLobbyBusy(false);
+    }
+  };
+
+  const handleExamPress = async () => {
+    if (examBankBusy) return;
+    setExamBankBusy(true);
+    setExamBankProgressText(null);
+    try {
+      const status = await fetchExamBankStatus(certification.id);
+      if (status.totalHave >= status.targetTotal && status.totalRemaining <= 0) {
+        const at = status.answerTypes;
+        if (at && at.total > 0 && !at.inTargetRange) {
+          const multiPct = Math.round(at.multiRatio * 100);
+          setExamBankProgressText(
+            `解答形式の比率が目安外です（単一 ${at.single} / 複数 ${at.multi} = 複数 ${multiPct}%）。SAP 目安は複数 20〜30%（目標 ${at.multiTarget} 問）です。単一選択を一部削除し、複数選択を再生成して調整しますか？`,
+          );
+          setExamRebalanceConfirmOpen(true);
+          return;
+        }
+        await openExamLobby();
+        return;
+      }
+      if (status.totalHave > 0 && status.totalRemaining > 0) {
+        setExamBankProgressText(
+          `生成が途中です（${status.totalHave}/${status.targetTotal}）。既存の問題は残したまま、続きから再開します。`,
+        );
+        setExamBankConfirmOpen(true);
+        return;
+      }
+      setExamBankProgressText(null);
+      setExamBankConfirmOpen(true);
+    } catch (error) {
+      setNoticeMessage(
+        getExamBankErrorMessage(
+          error,
+          '共有バンクの状態確認に失敗しました。',
+        ),
+      );
+    } finally {
+      setExamBankBusy(false);
+    }
+  };
+
+  const handleConfirmRebalanceMulti = async () => {
+    if (examBankBusy) return;
+    setExamBankBusy(true);
+    setExamBankProgressText('複数選択の比率を調整しています…');
+    try {
+      const rebalanced = await rebalanceExamBankForMulti(certification.id);
+      setExamBankProgressText(
+        rebalanced.deleted > 0
+          ? `単一選択を ${rebalanced.deleted} 問削除しました（現在 ${rebalanced.totalHave}/150）。複数選択を生成中…`
+          : '比率は既に近いため削除なし。不足分があれば生成します…',
+      );
+      const result = await runExamBankFullGeneration(
+        certification.id,
+        (step) => {
+          const multi =
+            step.answerTypes != null
+              ? ` / 単一${step.answerTypes.single}・複数${step.answerTypes.multi}`
+              : '';
+          setExamBankProgressText(
+            `作成済み ${step.totalHave}/${step.targetTotal} 問${multi}` +
+              (step.created > 0 ? `（今回 +${step.created}）` : '') +
+              '…',
+          );
+        },
+      );
+      setExamRebalanceConfirmOpen(false);
+      if (result.complete || result.totalRemaining <= 0) {
+        await openExamLobby();
+      } else {
+        setNoticeMessage(
+          `生成が途中です（${result.totalHave}/${result.targetTotal}）。もう一度「本番試験を実施」から再開してください。`,
+        );
+      }
+    } catch (error) {
+      setExamBankProgressText(null);
+      setNoticeMessage(
+        getExamBankErrorMessage(error, '複数選択比率の調整に失敗しました。'),
+      );
+    } finally {
+      setExamBankBusy(false);
+    }
+  };
+
+  const handleConfirmGenerateBank = async () => {
+    if (examBankBusy) return;
+    setExamBankBusy(true);
+    setExamBankProgressText('共有バンクを準備しています…');
+    try {
+      const status = await fetchExamBankStatus(certification.id);
+
+      // 不足分がある限り削除せず再開（failed / generating どちらでも）
+      const canResume = status.totalHave > 0 && status.totalRemaining > 0;
+
+      if (canResume) {
+        setExamBankProgressText(
+          `作成済み ${status.totalHave}/${status.targetTotal} 問から再開します…`,
+        );
+      } else {
+        setExamBankProgressText('作成済み 0/150 問から生成を開始します…');
+      }
+
+      const result = await runExamBankFullGeneration(
+        certification.id,
+        (step) => {
+          const multi =
+            step.answerTypes != null
+              ? ` / 単一${step.answerTypes.single}・複数${step.answerTypes.multi}`
+              : '';
+          setExamBankProgressText(
+            `作成済み ${step.totalHave}/${step.targetTotal} 問${multi}` +
+              (step.created > 0 ? `（今回 +${step.created}）` : '') +
+              '…',
+          );
+        },
+      );
+      setExamBankConfirmOpen(false);
+      if (result.complete || result.totalRemaining <= 0) {
+        await openExamLobby();
+      } else {
+        setNoticeMessage(
+          `生成が途中です（${result.totalHave}/${result.targetTotal}）。もう一度「本番試験を実施」から再開してください。`,
+        );
+      }
+    } catch (error) {
+      setExamBankProgressText(null);
+      setNoticeMessage(
+        getExamBankErrorMessage(error, '共有バンクの生成に失敗しました。'),
+      );
+    } finally {
+      setExamBankBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -565,6 +813,9 @@ export function CertMainScreen({
               ) : null}
               <Pressable
                 accessibilityRole="button"
+                onPress={() => {
+                  void handleExamPress();
+                }}
                 style={({ pressed }) => [
                   styles.examButton,
                   pressed && styles.examButtonPressed,
@@ -634,6 +885,9 @@ export function CertMainScreen({
               ) : null}
               <Pressable
                 accessibilityRole="button"
+                onPress={() => {
+                  void handleExamPress();
+                }}
                 style={({ pressed }) => [
                   styles.examButton,
                   pressed && styles.examButtonPressed,
@@ -993,6 +1247,131 @@ export function CertMainScreen({
       />
 
       <Modal
+        visible={examRebalanceConfirmOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!examBankBusy) setExamRebalanceConfirmOpen(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => {
+              if (!examBankBusy) setExamRebalanceConfirmOpen(false);
+            }}
+          />
+          <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
+            <Text style={styles.modalTitle}>複数選択の比率を調整しますか？</Text>
+            <Text style={styles.modalLead}>
+              現行バンクは単一選択に偏っている可能性があります。単一選択を一部削除し、複数選択（正解2つ）を再生成して SAP 目安（複数
+              20〜30%）に近づけます。
+            </Text>
+            {examBankProgressText ? (
+              <Text style={styles.modalLead}>{examBankProgressText}</Text>
+            ) : null}
+            {examBankBusy ? (
+              <View style={styles.historyEmptyBox}>
+                <ActivityIndicator color={colors.accent} />
+              </View>
+            ) : null}
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={examBankBusy}
+                onPress={() => {
+                  setExamRebalanceConfirmOpen(false);
+                  void openExamLobby();
+                }}
+                style={({ pressed }) => [
+                  styles.modalSecondaryButton,
+                  pressed && styles.modalSecondaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.modalSecondaryButtonLabel}>
+                  調整せず開始
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={examBankBusy}
+                onPress={() => {
+                  void handleConfirmRebalanceMulti();
+                }}
+                style={({ pressed }) => [
+                  styles.modalPrimaryButton,
+                  pressed && styles.modalPrimaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.modalPrimaryButtonLabel}>調整して再生成</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={examBankConfirmOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!examBankBusy) setExamBankConfirmOpen(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => {
+              if (!examBankBusy) setExamBankConfirmOpen(false);
+            }}
+          />
+          <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
+            <Text style={styles.modalTitle}>共有バンクを作成しますか？</Text>
+            <Text style={styles.modalLead}>
+              AWS SAP 向け共有バンク（150問）をAIで生成します。ドメイン比率は公式ガイドに沿い、1回あたり最大5問ずつ作成します。途中で止まっても既存の問題は残し、続きから再開できます。完了まで時間がかかります。
+            </Text>
+            {examBankProgressText ? (
+              <Text style={styles.modalLead}>{examBankProgressText}</Text>
+            ) : null}
+            {examBankBusy ? (
+              <View style={styles.historyEmptyBox}>
+                <ActivityIndicator color={colors.accent} />
+              </View>
+            ) : null}
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={examBankBusy}
+                onPress={() => setExamBankConfirmOpen(false)}
+                style={({ pressed }) => [
+                  styles.modalSecondaryButton,
+                  pressed && styles.modalSecondaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.modalSecondaryButtonLabel}>キャンセル</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={examBankBusy}
+                onPress={() => {
+                  void handleConfirmGenerateBank();
+                }}
+                style={({ pressed }) => [
+                  styles.modalPrimaryButton,
+                  pressed && styles.modalPrimaryButtonPressed,
+                  examBankBusy && styles.modalPrimaryButtonDisabled,
+                ]}
+              >
+                <Text style={styles.modalPrimaryButtonLabel}>
+                  {examBankBusy ? '生成中…' : '作成する'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={deleteTarget != null}
         transparent
         animationType="fade"
@@ -1265,6 +1644,18 @@ export function CertMainScreen({
         }}
       />
 
+      <ExamStartModal
+        visible={examLobbyIds != null}
+        certificationName={certification.name}
+        questionCount={examLobbyIds?.length ?? EXAM_QUESTION_COUNT}
+        timeLimitMinutes={EXAM_TIME_LIMIT_MINUTES}
+        busy={examLobbyBusy}
+        onStart={handleStartExam}
+        onClose={() => {
+          if (!examLobbyBusy) setExamLobbyIds(null);
+        }}
+      />
+
       <ExampleSolveModal
         visible={solveSession != null}
         exampleIds={solveSession?.exampleIds ?? []}
@@ -1273,6 +1664,8 @@ export function CertMainScreen({
         historyId={solveSession?.historyId ?? null}
         initialMessages={solveSession?.initialMessages ?? []}
         resumeMode={solveSession?.resumeMode ?? false}
+        examMode={solveSession?.examMode ?? false}
+        timeLimitSeconds={solveSession?.timeLimitSeconds ?? null}
         onClose={() => {
           setSolveSession(null);
           void loadDueCount();
@@ -1281,7 +1674,65 @@ export function CertMainScreen({
           void loadHistories();
           void loadDueCount();
         }}
+        onExamFinished={(payload) => {
+          void handleExamFinished(payload);
+        }}
       />
+
+      <Modal
+        visible={bankImportIds != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!bankImportBusy) setBankImportIds(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => {
+              if (!bankImportBusy) setBankImportIds(null);
+            }}
+          />
+          <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
+            <Text style={styles.modalTitle}>共有バンクを取り込みますか？</Text>
+            <Text style={styles.modalLead}>
+              今回の試験で出た共有バンク問題のうち、まだ例題一覧にないものが{' '}
+              {bankImportIds?.length ?? 0}{' '}
+              問あります。例題一覧へ取り込みますか？（設定で次回以降の確認表示をオフにもできます）
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={bankImportBusy}
+                onPress={() => setBankImportIds(null)}
+                style={({ pressed }) => [
+                  styles.modalSecondaryButton,
+                  pressed && styles.modalSecondaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.modalSecondaryButtonLabel}>いまはしない</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={bankImportBusy}
+                onPress={() => {
+                  void handleConfirmBankImport();
+                }}
+                style={({ pressed }) => [
+                  styles.modalPrimaryButton,
+                  pressed && styles.modalPrimaryButtonPressed,
+                  bankImportBusy && styles.modalPrimaryButtonDisabled,
+                ]}
+              >
+                <Text style={styles.modalPrimaryButtonLabel}>
+                  {bankImportBusy ? '取り込み中…' : '取り込む'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <ExampleReportModal
         visible={reportTarget != null}
@@ -2161,6 +2612,9 @@ const styles = StyleSheet.create({
   },
   modalPrimaryButtonPressed: {
     backgroundColor: colors.accentDeep,
+  },
+  modalPrimaryButtonDisabled: {
+    opacity: 0.55,
   },
   modalPrimaryButtonLabel: {
     fontFamily: 'NotoSansJP_700Bold',

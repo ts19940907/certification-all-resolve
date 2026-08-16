@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>卒業制作｜追加機能と現状の図解（CertResolve）</title>
+    <style>
+      :root {
+        --ink: #1a2330;
+        --muted: #5a6573;
+        --line: #d7dde5;
+        --paper: #ffffff;
+        --wash: #f3f5f8;
+        --accent: #0e7c7b;
+        --accent-soft: #e6f4f3;
+        --spotlight: #e4572e;
+        --navy: #1e2a3a;
+        --info-bg: #eef5ff;
+        --info-line: #b7cff5;
+        --warn-bg: #fff6ee;
+        --warn-line: #f0c49a;
+        --ok-bg: #eef8f0;
+        --ok-line: #b5d9bc;
+        --todo-bg: #f7f2ff;
+        --todo-line: #d4c4f0;
+        --later-bg: #f4f6f8;
+        --later-line: #c8d0da;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--wash);
+        font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif;
+        line-height: 1.75;
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 40px 20px 88px;
+      }
+
+      h1 {
+        font-size: 1.65rem;
+        line-height: 1.4;
+        margin: 0 0 10px;
+      }
+
+      h2 {
+        font-size: 1.28rem;
+        margin: 0 0 12px;
+        padding-bottom: 8px;
+        border-bottom: 2px solid var(--accent-soft);
+      }
+
+      h3 {
+        font-size: 1.05rem;
+        margin: 0 0 8px;
+      }
+
+      h4 {
+        font-size: 0.95rem;
+        margin: 0 0 6px;
+      }
+
+      p {
+        margin: 0 0 12px;
+      }
+
+      .sub {
+        color: var(--muted);
+        margin-bottom: 28px;
+      }
+
+      .hero {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 22px;
+        margin-bottom: 24px;
+      }
+
+      .hero-label {
+        display: inline-block;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        color: var(--accent);
+        background: var(--accent-soft);
+        border-radius: 999px;
+        padding: 4px 10px;
+        margin-bottom: 12px;
+      }
+
+      .hero p:last-child {
+        margin-bottom: 0;
+      }
+
+      .toc {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px 18px;
+        margin-bottom: 28px;
+      }
+
+      .toc ol {
+        margin: 8px 0 0;
+        padding-left: 1.3em;
+      }
+
+      .toc li + li {
+        margin-top: 4px;
+      }
+
+      .toc a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .toc a:hover {
+        text-decoration: underline;
+      }
+
+      .callout {
+        border: 1px solid var(--line);
+        background: var(--paper);
+        border-radius: 12px;
+        padding: 16px 18px;
+        margin: 0 0 20px;
+      }
+
+      .callout.info {
+        background: var(--info-bg);
+        border-color: var(--info-line);
+      }
+
+      .callout.warn {
+        background: var(--warn-bg);
+        border-color: var(--warn-line);
+      }
+
+      .callout.ok {
+        background: var(--ok-bg);
+        border-color: var(--ok-line);
+      }
+
+      .callout.todo {
+        background: var(--todo-bg);
+        border-color: var(--todo-line);
+      }
+
+      .callout.later {
+        background: var(--later-bg);
+        border-color: var(--later-line);
+      }
+
+      .callout strong.title {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .grid-3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 12px;
+      }
+
+      .card {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px 18px;
+      }
+
+      .card ul {
+        margin: 0;
+        padding-left: 1.15em;
+      }
+
+      .card li + li {
+        margin-top: 8px;
+      }
+
+      section {
+        margin-bottom: 40px;
+      }
+
+      /* タイムライン：実装の経緯 */
+      .timeline {
+        display: grid;
+        gap: 0;
+        margin: 16px 0 8px;
+        border-left: 3px solid var(--accent-soft);
+        padding-left: 0;
+      }
+
+      .timeline-item {
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 12px;
+        padding: 0 0 20px 4px;
+        position: relative;
+      }
+
+      .timeline-item:last-child {
+        padding-bottom: 0;
+      }
+
+      .timeline-dot {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--accent);
+        border: 3px solid var(--accent-soft);
+        margin-left: -15px;
+        margin-top: 4px;
+      }
+
+      .timeline-dot.hot {
+        background: var(--spotlight);
+        border-color: #fde8e1;
+      }
+
+      .timeline-dot.todo {
+        background: #8b6bc4;
+        border-color: var(--todo-bg);
+      }
+
+      .timeline-body {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px 16px;
+      }
+
+      .timeline-body p {
+        margin: 0;
+        font-size: 0.92rem;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .flow-overview {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: stretch;
+        gap: 8px;
+        margin: 16px 0 8px;
+      }
+
+      .flow-step {
+        flex: 1 1 100px;
+        min-width: 110px;
+        background: var(--accent-soft);
+        border: 1px solid #b9d9d5;
+        border-radius: 12px;
+        padding: 12px;
+      }
+
+      .flow-step .n {
+        font-weight: 700;
+        color: var(--accent);
+        font-size: 0.85rem;
+      }
+
+      .flow-step h3 {
+        margin-top: 4px;
+        font-size: 0.92rem;
+      }
+
+      .flow-step p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.5;
+      }
+
+      .arrow {
+        align-self: center;
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .step-block {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 18px;
+      }
+
+      .step-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .step-num {
+        flex: 0 0 auto;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .step-num.new {
+        background: var(--spotlight);
+      }
+
+      .step-num.self {
+        background: var(--navy);
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .shot {
+        margin-top: 14px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+        background: #e8eef3;
+      }
+
+      .shot img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .shot-caption {
+        padding: 10px 12px;
+        font-size: 0.82rem;
+        color: var(--muted);
+        background: var(--paper);
+        border-top: 1px solid var(--line);
+      }
+
+      .why-box {
+        margin-top: 10px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: var(--warn-bg);
+        border: 1px solid var(--warn-line);
+        font-size: 0.9rem;
+      }
+
+      .why-box strong {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--spotlight);
+        font-size: 0.82rem;
+      }
+
+      .main-map {
+        display: grid;
+        grid-template-columns: 1fr 1.25fr 1fr;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .main-map .zone {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        background: var(--wash);
+      }
+
+      .main-map .zone h4 {
+        margin: 0 0 6px;
+        font-size: 0.92rem;
+        color: var(--accent);
+      }
+
+      .main-map .zone p {
+        margin: 0;
+        font-size: 0.84rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      .header-map {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0 4px;
+      }
+
+      .header-chip {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+        flex: 1 1 140px;
+        min-width: 130px;
+      }
+
+      .header-chip h4 {
+        margin: 0 0 4px;
+        font-size: 0.88rem;
+      }
+
+      .header-chip p {
+        margin: 0;
+        font-size: 0.8rem;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .header-chip.hot {
+        border-color: #f0c49a;
+        background: var(--warn-bg);
+      }
+
+      /* 簡易UI図：ヘッダー＋3カラム */
+      .ui-sketch {
+        margin-top: 14px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+        background: var(--paper);
+      }
+
+      .ui-header {
+        background: var(--navy);
+        color: #fff;
+        padding: 12px 14px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .ui-header .brand {
+        font-weight: 700;
+        font-size: 0.95rem;
+      }
+
+      .ui-header .brand span {
+        display: block;
+        font-weight: 400;
+        font-size: 0.72rem;
+        opacity: 0.85;
+        margin-top: 2px;
+      }
+
+      .ui-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .ui-pill {
+        background: #fff;
+        color: var(--ink);
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 5px 9px;
+        border-radius: 999px;
+      }
+
+      .ui-pill.exam {
+        background: var(--spotlight);
+        color: #fff;
+      }
+
+      .ui-pill.review::after {
+        content: "1";
+        display: inline-block;
+        margin-left: 4px;
+        background: var(--accent);
+        color: #fff;
+        border-radius: 999px;
+        padding: 0 5px;
+        font-size: 0.68rem;
+      }
+
+      .ui-body {
+        display: grid;
+        grid-template-columns: 1fr 1.3fr 1fr;
+        gap: 0;
+        min-height: 160px;
+      }
+
+      .ui-col {
+        padding: 14px;
+        border-right: 1px solid var(--line);
+        background: var(--wash);
+      }
+
+      .ui-col:last-child {
+        border-right: 0;
+      }
+
+      .ui-col.center {
+        background: #fff;
+      }
+
+      .ui-col h4 {
+        margin: 0 0 8px;
+        font-size: 0.84rem;
+        color: var(--accent);
+      }
+
+      .ui-col ul {
+        margin: 0;
+        padding-left: 1.1em;
+        font-size: 0.78rem;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .ui-col li + li {
+        margin-top: 4px;
+      }
+
+      .badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #e8eef3;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+
+      .badge.accent {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .badge.hot {
+        background: #fde8e1;
+        color: var(--spotlight);
+      }
+
+      .badge.new {
+        background: #fde8e1;
+        color: var(--spotlight);
+      }
+
+      .badge.self {
+        background: #e8eef3;
+        color: var(--navy);
+      }
+
+      .badge.done {
+        background: var(--ok-bg);
+        color: #2d6b3a;
+      }
+
+      .badge.todo {
+        background: var(--todo-bg);
+        color: #6b4a9e;
+      }
+
+      .badge.later {
+        background: #e8eef3;
+        color: var(--muted);
+      }
+
+      .badge.deploy {
+        background: var(--info-bg);
+        color: #2a5a9e;
+      }
+
+      .status-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0 0;
+      }
+
+      .status-item {
+        flex: 1 1 200px;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px 16px;
+      }
+
+      .status-item p {
+        margin: 0;
+        font-size: 0.88rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      .compare {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 10px;
+        align-items: stretch;
+        margin-top: 14px;
+      }
+
+      .compare-box {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px 16px;
+      }
+
+      .compare-arrow {
+        align-self: center;
+        font-weight: 700;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      hr {
+        border: 0;
+        border-top: 1px solid var(--line);
+        margin: 8px 0 32px;
+      }
+
+      footer.note {
+        margin-top: 8px;
+        padding: 14px 16px;
+        border-radius: 12px;
+        border: 1px dashed var(--line);
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      @media (max-width: 760px) {
+        .grid-2,
+        .grid-3,
+        .main-map,
+        .ui-body,
+        .compare {
+          grid-template-columns: 1fr;
+        }
+
+        .ui-col {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .ui-col:last-child {
+          border-bottom: 0;
+        }
+
+        .arrow,
+        .compare-arrow {
+          width: 100%;
+          text-align: center;
+          transform: rotate(90deg);
+        }
+      }
+
+      @media print {
+        body {
+          background: #fff;
+        }
+
+        .shot,
+        .step-block,
+        .ui-sketch {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="hero-label">卒業制作｜実装アップデート図解</p>
+      <h1>
+        基本機能の実装後に追加した機能と、<br />いまの到達点・残課題
+      </h1>
+      <p class="sub">
+        本資料は
+        <code>graduation-tool-overview.html</code>
+        で説明した機能を実装したあと、AIフィードバックや自己判断で足した機能・デプロイ状況・残作業を図解したものです。画面は実際のアプリから撮ったイメージです。
+      </p>
+
+      <div class="hero">
+        <p>
+          <strong>ひとことで言うと</strong><br />
+          「問題を作って解く・聞く・説明する」だけでは定着と品質と現在地が見えにくい、という指摘を受けて、復習・分析・誤り報告を足し、設定・カテゴリ・本番試験も整えました。本番試験まわりの見た目確認とレスポンシブを仕上げたあと、Vercelへ再デプロイする予定です。
+        </p>
+      </div>
+
+      <nav class="toc" aria-label="目次">
+        <strong>この資料の見方</strong>
+        <ol>
+          <li><a href="#story">実装の経緯（いつ何を足したか）</a></li>
+          <li><a href="#main">リニューアル後のメイン画面</a></li>
+          <li><a href="#ai-added">AIフィードバック由来の追加機能</a></li>
+          <li><a href="#self-added">そのほか追加した対応</a></li>
+          <li><a href="#exam">本番試験の現状</a></li>
+          <li><a href="#deploy">デプロイ状況</a></li>
+          <li><a href="#todo">残りの対応</a></li>
+          <li><a href="#after">卒業制作完了後にやりたいこと</a></li>
+        </ol>
+      </nav>
+
+      <!-- ========== 経緯 ========== -->
+      <section id="story">
+        <h2>実装の経緯</h2>
+        <div class="timeline">
+          <div class="timeline-item">
+            <div class="timeline-dot" aria-hidden="true"></div>
+            <div class="timeline-body">
+              <span class="badge done">完了</span>
+              <h4>基本機能の実装</h4>
+              <p>
+                資格登録・例題作成／編集／削除・まとめて解く・AI質問・キーワード自己説明・実施履歴など。概要は
+                <code>graduation-tool-overview.html</code>
+                で説明した範囲。
+              </p>
+            </div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-dot hot" aria-hidden="true"></div>
+            <div class="timeline-body">
+              <span class="badge new">今回の主題</span>
+              <h4>AIフィードバック後の追加 ＋ 自己判断の追加</h4>
+              <p>
+                間隔反復の復習、弱点可視化、誤り連絡。あわせて設定画面・カテゴリ・本番試験（手元資格向け）を追加。メイン画面もリニューアル。
+              </p>
+            </div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-dot" aria-hidden="true"></div>
+            <div class="timeline-body">
+              <span class="badge deploy">デプロイ済</span>
+              <h4>Vercelへ一度デプロイ</h4>
+              <p>
+                本番試験機能がまだ未実装の状態のバージョンを Vercel
+                に公開済み。
+              </p>
+            </div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-dot todo" aria-hidden="true"></div>
+            <div class="timeline-body">
+              <span class="badge todo">これから</span>
+              <h4>残課題の確認 → レスポンシブ → 再デプロイ</h4>
+              <p>
+                本番試験受験後の分析・履歴の見た目確認と、スマホ向けレスポンシブを終えたら Vercel
+                へ再デプロイ。
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <hr />
+
+      <!-- ========== メイン画面 ========== -->
+      <section id="main">
+        <h2>リニューアル後のメイン画面</h2>
+        <p class="muted">
+          資格を選んだあとの司令室です。追加機能の入口はヘッダーに集約し、本体は3カラムのまま役割をはっきりさせています。
+        </p>
+
+        <div class="ui-sketch" aria-label="メイン画面の構成スケッチ">
+          <div class="ui-header">
+            <div class="brand">
+              CertResolve
+              <span>選択中の資格名（例：AWS SAP）</span>
+            </div>
+            <div class="ui-pills">
+              <span class="ui-pill review">今日の復習</span>
+              <span class="ui-pill">分析</span>
+              <span class="ui-pill">設定</span>
+              <span class="ui-pill exam">本番試験を実施</span>
+            </div>
+          </div>
+          <div class="ui-body">
+            <div class="ui-col">
+              <h4>左｜実施履歴</h4>
+              <ul>
+                <li>まとめて解く</li>
+                <li>AIへの質問</li>
+                <li>キーワードレビュー</li>
+                <li>最新順に詳細へ</li>
+              </ul>
+            </div>
+            <div class="ui-col center">
+              <h4>中央｜例題一覧</h4>
+              <ul>
+                <li>まとめて解く／新規作成</li>
+                <li>カテゴリタグ表示</li>
+                <li>単独で解く・誤り連絡</li>
+                <li>編集・削除</li>
+              </ul>
+            </div>
+            <div class="ui-col">
+              <h4>右｜キーワード自己説明</h4>
+              <ul>
+                <li>キーワード入力</li>
+                <li>自分の言葉で説明</li>
+                <li>AIが理解度を評価</li>
+                <li>復習カードの入口</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <h3 style="margin-top: 22px">ヘッダーの入口（追加分のハブ）</h3>
+        <div class="header-map">
+          <div class="header-chip">
+            <span class="badge new">追加</span>
+            <h4>今日の復習</h4>
+            <p>期限が来たカードを再テスト。件数バッジ付き。</p>
+          </div>
+          <div class="header-chip">
+            <span class="badge new">追加</span>
+            <h4>分析</h4>
+            <p>カテゴリ理解度・キーワード進捗のダッシュボード。</p>
+          </div>
+          <div class="header-chip">
+            <span class="badge self">追加</span>
+            <h4>設定</h4>
+            <p>メール・パスワード変更、ログアウト。</p>
+          </div>
+          <div class="header-chip hot">
+            <span class="badge hot">右上</span>
+            <h4>本番試験を実施</h4>
+            <p>制限時間つきの本番に近い受験画面へ。</p>
+          </div>
+        </div>
+
+        <h3 style="margin-top: 20px">3カラムの役割</h3>
+        <div class="main-map">
+          <div class="zone">
+            <span class="badge">左</span>
+            <h4>実施履歴</h4>
+            <p>何をしてどうだったかを新しい順に確認。本番試験結果の見え方確認は残課題。</p>
+          </div>
+          <div class="zone">
+            <span class="badge accent">中央</span>
+            <h4>例題一覧</h4>
+            <p>作成・編集・削除、単独／まとめて解く。カテゴリタグと「誤りを連絡」付き。</p>
+          </div>
+          <div class="zone">
+            <span class="badge accent">右</span>
+            <h4>キーワードの自己説明</h4>
+            <p>理解度チェック。定着の入口であり、間隔反復の種にもなる。</p>
+          </div>
+        </div>
+
+        <div class="shot">
+          <img
+            src="new-main-screen.png"
+            alt="リニューアル後のメイン画面。履歴・例題一覧・キーワード自己説明とヘッダー操作"
+          />
+          <div class="shot-caption">
+            画面イメージ｜メイン画面（復習・分析・設定・本番試験の入口＋3カラム）
+          </div>
+        </div>
+      </section>
+
+      <hr />
+
+      <!-- ========== AI追加 ========== -->
+      <section id="ai-added">
+        <h2>AIフィードバックを受けて追加した機能</h2>
+        <div class="callout info">
+          <strong class="title">経緯</strong>
+          基本機能を実装したあと、AIレビューで「定着」「現在地の可視化」「生成物の品質担保」が足りないと判断し、次の3つを追加しました。
+        </div>
+
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num new">A</div>
+            <div>
+              <span class="badge new">AI指摘 → 追加</span>
+              <h3>間隔反復（エビングハウスの忘却曲線）に基づく復習</h3>
+              <p class="muted" style="margin: 0">
+                Ankiのような分散学習です。一度説明できたキーワードや解いた例題も、忘れる前提で「3日後」「1週間後」などに自動で再テストします。ヘッダーの「今日の復習」から開始します。
+              </p>
+            </div>
+          </div>
+          <div class="why-box">
+            <strong>なぜ追加したか</strong>
+            「自力説明」や「逆引き問題」をやっても、人間はすぐ忘れる。再テストの仕組みがないと実用的な定着に結びつきにくい、という指摘への対応です。
+          </div>
+          <div class="shot">
+            <img
+              src="review-screen.png"
+              alt="今日の復習モーダル。期限が来た例題を再テストする画面"
+            />
+            <div class="shot-caption">
+              画面イメージ｜「今日の復習」モーダル（件数バッジから開く）
+            </div>
+          </div>
+        </article>
+
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num new">B</div>
+            <div>
+              <span class="badge new">AI指摘 → 追加</span>
+              <h3>弱点・理解度の可視化ダッシュボード</h3>
+              <p class="muted" style="margin: 0">
+                履歴だけでなく、「ストレージ系は80%だがネットワーク系は30%」「説明できたキーワード数：15/50個」といった現在地を、レーダーチャートと進捗率で一目で見られます。全体／月次／週次の切り替えに対応しています。
+              </p>
+            </div>
+          </div>
+          <div class="why-box">
+            <strong>なぜ追加したか</strong>
+            「何をしたか」は履歴で見えるが、「今どこが弱いか」が一目でわからないと、次に何を勉強すべきか決めづらく、モチベーションも続きにくい、という指摘への対応です。
+          </div>
+          <div class="shot">
+            <img
+              src="comprehension-screen.png"
+              alt="分析モーダル。カテゴリ理解度のタグとレーダーチャート、キーワード進捗"
+            />
+            <div class="shot-caption">
+              画面イメージ｜「分析」モーダル（カテゴリ理解度＋キーワード進捗）
+            </div>
+          </div>
+        </article>
+
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num new">C</div>
+            <div>
+              <span class="badge new">AI指摘 → 追加</span>
+              <h3>AI生成コンテンツのユーザーフィードバック機構</h3>
+              <p class="muted" style="margin: 0">
+                例題カードの「誤りを連絡」から、問題文・選択肢／正解・解説・その他を選んで報告できます。サブエージェントレビューを入れても、生成問題の不備（正解が2つある等）をゼロにはできない前提の安全弁です。報告をきっかけに修正・再学習につなげます。
+              </p>
+            </div>
+          </div>
+          <div class="why-box">
+            <strong>なぜ追加したか</strong>
+            生成物の品質をレビューだけで保証しきれないため、ユーザーが「おかしい」と報告し、修正・再学習につなげる仕組みが必要、という指摘への対応です。
+          </div>
+          <div class="shot">
+            <img
+              src="mistake-report-screen.png"
+              alt="内容の誤りを連絡するモーダル。対象の選択と連絡内容の入力"
+            />
+            <div class="shot-caption">
+              画面イメージ｜「内容の誤りを連絡」モーダル
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <hr />
+
+      <!-- ========== 自己追加 ========== -->
+      <section id="self-added">
+        <h2>そのほか追加した対応（AI指摘以外）</h2>
+        <div class="callout ok">
+          <strong class="title">自己判断での追加</strong>
+          アカウント管理・分類軸・本番に近い演習の3点を足しました。
+        </div>
+
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num self">D</div>
+            <div>
+              <span class="badge self">追加対応</span>
+              <h3>設定画面（メール・パスワード変更）</h3>
+              <p class="muted" style="margin: 0">
+                メールアドレス変更、パスワード変更（現在のパスワード確認付き）、ログアウトをまとめた設定画面です。
+              </p>
+            </div>
+          </div>
+          <div class="shot">
+            <img
+              src="setting-screen.png"
+              alt="設定画面。メールアドレス変更、パスワード変更、ログアウト"
+            />
+            <div class="shot-caption">画面イメージ｜設定</div>
+          </div>
+        </article>
+
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num self">E</div>
+            <div>
+              <span class="badge self">追加対応</span>
+              <h3>問題へのカテゴリー追加</h3>
+              <p class="muted" style="margin: 0">
+                例題にカテゴリ（例：ストレージ・データベース、ネットワーク・コンテンツ配信
+                など）を付与し、一覧表示と分析ダッシュボードの軸に使います。カテゴリ一覧では累積の正解率も確認できます。
+              </p>
+            </div>
+          </div>
+          <div class="shot">
+            <img
+              src="category-list-screen.png"
+              alt="カテゴリー一覧モーダル。各カテゴリの正解率と件数"
+            />
+            <div class="shot-caption">
+              画面イメージ｜カテゴリー一覧（累積の正解率付き）
+            </div>
+          </div>
+        </article>
+
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num self">F</div>
+            <div>
+              <span class="badge self">追加対応</span>
+              <h3>本番試験（手元の資格向け）</h3>
+              <p class="muted" style="margin: 0">
+                実際の試験に近い制限時間で回答時間を管理し、好きなタイミングで好きな問題を解けます。受験し終わった問題は例題に追加できます。詳細は次セクション。
+              </p>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <hr />
+
+      <!-- ========== 本番試験 ========== -->
+      <section id="exam">
+        <h2>本番試験の現状</h2>
+        <div class="callout warn">
+          <strong class="title">実装の進め方（現状）</strong>
+          汎用的に「どの資格でも本番試験を自動生成する」機能は、まだ未実装です。自分の資格向けの本番試験問題を用意し、受験できるところまでは進めています。問題は作成済みですが、実際にはまだ解いていない分もあります。
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <span class="badge done">できていること</span>
+            <h3>手元の資格向け本番試験</h3>
+            <ul>
+              <li>「本番試験を実施」から受験できる</li>
+              <li>実際の試験に近い制限時間でタイマー管理</li>
+              <li>好きなタイミングで好きな問題を解ける（番号ナビ）</li>
+              <li>途中でも採点して終了できる</li>
+              <li>受験し終わった問題を例題に追加できる</li>
+              <li>自分の資格の問題は作成済み</li>
+            </ul>
+          </div>
+          <div class="card">
+            <span class="badge todo">まだない／未確認</span>
+            <h3>汎用化と見た目の確認</h3>
+            <ul>
+              <li>任意の資格向けに本番試験を一括生成する仕組み</li>
+              <li>受験後の得意／苦手分野分析の見た目確認</li>
+              <li>実施履歴への本番試験結果反映の見た目確認</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="shot">
+          <img
+            src="exam-screen.png"
+            alt="本番試験モーダル。残り時間、問題番号ナビ、問題文、前後移動"
+          />
+          <div class="shot-caption">
+            画面イメージ｜本番試験（制限時間・問題番号ナビ・途中採点）
+          </div>
+        </div>
+      </section>
+
+      <hr />
+
+      <!-- ========== デプロイ ========== -->
+      <section id="deploy">
+        <h2>デプロイ状況</h2>
+        <div class="compare">
+          <div class="compare-box">
+            <span class="badge deploy">いま</span>
+            <h3>Vercel（公開済み）</h3>
+            <p class="muted" style="margin: 0">
+              本番試験機能が未実装の状態のバージョンをデプロイ済み。基本機能＋復習・分析・誤り連絡・設定・カテゴリまでの到達点を外部から確認できる状態です。
+            </p>
+          </div>
+          <div class="compare-arrow" aria-hidden="true">→</div>
+          <div class="compare-box">
+            <span class="badge todo">次</span>
+            <h3>残課題完了後に再デプロイ</h3>
+            <p class="muted" style="margin: 0">
+              本番試験の結果画面・履歴の見た目確認と、スマホ向けレスポンシブを終えてから、Vercel
+              へ再デプロイします。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <hr />
+
+      <!-- ========== 残り ========== -->
+      <section id="todo">
+        <h2>残りの対応</h2>
+        <div class="callout todo">
+          <strong class="title">卒業制作としての仕上げ前チェック</strong>
+          機能の骨格は揃っているので、本番試験を実際に通したあとの見え方と、狭い画面での使いやすさを確認するのが次の作業です。
+        </div>
+
+        <div class="flow-overview" aria-label="残課題の流れ">
+          <div class="flow-step">
+            <div class="n">①</div>
+            <h3>分析結果の確認</h3>
+            <p>受験後の得意／苦手分野</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-step">
+            <div class="n">②</div>
+            <h3>履歴の見た目</h3>
+            <p>実施履歴への反映確認</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-step">
+            <div class="n">③</div>
+            <h3>レスポンシブ</h3>
+            <p>スマホ等の画面幅対応</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-step">
+            <div class="n">④</div>
+            <h3>再デプロイ</h3>
+            <p>Vercel へ最新版を公開</p>
+          </div>
+        </div>
+
+        <div class="status-row">
+          <div class="status-item">
+            <span class="badge todo">残</span>
+            <h4>得意分野・苦手分野の分析結果</h4>
+            <p>
+              本番試験受験後に表示される分野別の分析結果の見た目・内容を確認する。
+            </p>
+          </div>
+          <div class="status-item">
+            <span class="badge todo">残</span>
+            <h4>実施履歴の見た目</h4>
+            <p>
+              本番試験の結果が実施履歴にどう載るか、詳細画面の見え方を確認する。
+            </p>
+          </div>
+          <div class="status-item">
+            <span class="badge todo">残</span>
+            <h4>レスポンシブデザイン</h4>
+            <p>
+              スマホなど狭い画面でも、3カラムとモーダル群が崩れず使えるようにする。
+            </p>
+          </div>
+          <div class="status-item">
+            <span class="badge todo">残</span>
+            <h4>Vercel 再デプロイ</h4>
+            <p>
+              上記が完了したあと、本番試験込みの最新版を Vercel に載せ直す。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <hr />
+
+      <!-- ========== 卒業後 ========== -->
+      <section id="after">
+        <h2>卒業制作完了後にやりたいこと</h2>
+        <div class="grid-2">
+          <div class="card">
+            <span class="badge later">余裕があれば卒業まで</span>
+            <h3>ファビコン制作</h3>
+            <p class="muted" style="margin: 0">
+              ブラウザタブやブックマークで識別しやすくするため。時間に余裕があれば卒業制作までに対応したい項目です。
+            </p>
+          </div>
+          <div class="card">
+            <span class="badge later">卒業後</span>
+            <h3>料金体系の設計</h3>
+            <p class="muted" style="margin: 0">
+              他ユーザーが使う想定で、無料枠・有料枠・AI利用量など、持続可能な料金体系を設計する。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <footer class="note">
+        関連資料：基本機能の説明は
+        <code>graduation-tool-overview.html</code>
+        。本ファイルは「実装後の追加・現状・残課題」に絞った図解です。画像は同フォルダ内の PNG
+        を参照しています。
+      </footer>
+    </main>
+  </body>
+</html>

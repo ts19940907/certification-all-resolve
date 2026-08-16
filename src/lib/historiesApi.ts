@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { getErrorMessage } from './certificationsApi';
+import { ensureCurrentUserRow, getErrorMessage } from './certificationsApi';
 import type {
   ExampleAiChatDetail,
   ExampleBatchDetail,
@@ -19,6 +19,11 @@ type HistoryRow = {
   performed_at: string;
   detail: unknown;
 };
+
+async function requireUserId() {
+  const user = await ensureCurrentUserRow();
+  return user.id;
+}
 
 function formatPerformedAt(iso: string): string {
   const d = new Date(iso);
@@ -106,19 +111,44 @@ function parseExampleBatchDetail(raw: unknown): ExampleBatchDetail | null {
 function parseDetail(kind: string, raw: unknown): HistoryDetail | null {
   if (kind === 'example_ai_chat') return parseAiChatDetail(raw);
   if (kind === 'keyword_review') return parseKeywordReviewDetail(raw);
-  if (kind === 'example_batch') return parseExampleBatchDetail(raw);
+  if (kind === 'example_batch' || kind === 'exam') {
+    return parseExampleBatchDetail(raw);
+  }
   return null;
 }
 
 function mapHistory(row: HistoryRow): HistorySummary {
+  const batchDetail =
+    row.kind === 'example_batch' || row.kind === 'exam'
+      ? parseExampleBatchDetail(row.detail)
+      : null;
+
+  let kind = row.kind;
+  let title = row.title;
+
+  // 旧データ: 試験も example_batch で保存されていたため、件数で表示を補正
+  // （まとめて解くの上限は 25 問）
+  if (kind === 'exam' && title.startsWith('例題をまとめて解く')) {
+    title = batchDetail
+      ? buildExamHistoryTitle(batchDetail.total)
+      : title.replace(/^例題をまとめて解く/, '本番試験');
+  } else if (
+    kind === 'example_batch' &&
+    batchDetail != null &&
+    batchDetail.total > 25
+  ) {
+    kind = 'exam';
+    title = buildExamHistoryTitle(batchDetail.total);
+  }
+
   return {
     id: row.id,
-    kind: row.kind,
-    title: row.title,
+    kind,
+    title,
     summary: row.summary,
     performedAt: formatPerformedAt(row.performed_at),
     performedAtRaw: row.performed_at,
-    detail: parseDetail(row.kind, row.detail),
+    detail: batchDetail ?? parseDetail(row.kind, row.detail),
   };
 }
 
@@ -157,6 +187,7 @@ export async function insertAiChatHistory(args: {
   exampleTitle: string;
   messages: HistoryChatMessage[];
 }): Promise<string> {
+  const userId = await requireUserId();
   const detail: ExampleAiChatDetail = {
     example_id: args.exampleId,
     messages: args.messages,
@@ -165,6 +196,7 @@ export async function insertAiChatHistory(args: {
     .from('histories')
     .insert({
       certification_id: args.certificationId,
+      user_id: userId,
       kind: 'example_ai_chat',
       title: buildAiChatHistoryTitle(args.exampleTitle),
       summary: buildAiChatHistorySummary(args.messages),
@@ -224,10 +256,12 @@ export async function insertKeywordReviewHistory(args: {
   certificationId: string;
   review: KeywordReviewResult;
 }): Promise<string> {
+  const userId = await requireUserId();
   const { data, error } = await supabase
     .from('histories')
     .insert({
       certification_id: args.certificationId,
+      user_id: userId,
       kind: 'keyword_review',
       title: buildKeywordReviewHistoryTitle(args.review.keyword),
       summary: buildKeywordReviewHistorySummary(args.review),
@@ -248,6 +282,10 @@ export function buildExampleBatchHistoryTitle(total: number): string {
   return `例題をまとめて解く — ${total}問`;
 }
 
+export function buildExamHistoryTitle(total: number): string {
+  return `本番試験 — ${total}問`;
+}
+
 export function buildExampleBatchHistorySummary(
   correctCount: number,
   total: number,
@@ -258,7 +296,10 @@ export function buildExampleBatchHistorySummary(
 export async function insertExampleBatchHistory(args: {
   certificationId: string;
   results: ExampleBatchResultItem[];
+  /** true のとき履歴 kind/title を本番試験にする */
+  examMode?: boolean;
 }): Promise<string> {
+  const userId = await requireUserId();
   const total = args.results.length;
   const correctCount = args.results.filter((item) => item.correct).length;
   const detail: ExampleBatchDetail = {
@@ -266,12 +307,16 @@ export async function insertExampleBatchHistory(args: {
     correct_count: correctCount,
     results: args.results,
   };
+  const examMode = Boolean(args.examMode);
   const { data, error } = await supabase
     .from('histories')
     .insert({
       certification_id: args.certificationId,
-      kind: 'example_batch',
-      title: buildExampleBatchHistoryTitle(total),
+      user_id: userId,
+      kind: examMode ? 'exam' : 'example_batch',
+      title: examMode
+        ? buildExamHistoryTitle(total)
+        : buildExampleBatchHistoryTitle(total),
       summary: buildExampleBatchHistorySummary(correctCount, total),
       detail,
     })

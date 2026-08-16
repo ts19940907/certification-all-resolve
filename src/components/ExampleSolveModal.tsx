@@ -49,8 +49,14 @@ type Props = {
   historyId?: string | null;
   initialMessages?: HistoryChatMessage[];
   resumeMode?: boolean;
+  /** 本番試験モード（表示文言・制限時間用） */
+  examMode?: boolean;
+  /** 制限時間（秒）。指定時のみカウントダウン */
+  timeLimitSeconds?: number | null;
   onClose: () => void;
   onHistoryChanged?: () => void;
+  /** 本番試験を採点・時間切れまで完了して閉じたとき */
+  onExamFinished?: (payload: { exampleIds: string[] }) => void;
 };
 
 type DisplayChoice = SelectAnswer & { label: string };
@@ -61,6 +67,17 @@ function toChoiceLabel(index: number) {
   return String.fromCharCode('A'.charCodeAt(0) + index);
 }
 
+function formatCountdown(totalSeconds: number) {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  const s = safe % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 export function ExampleSolveModal({
   visible,
   exampleIds,
@@ -69,8 +86,11 @@ export function ExampleSolveModal({
   historyId = null,
   initialMessages = [],
   resumeMode = false,
+  examMode = false,
+  timeLimitSeconds = null,
   onClose,
   onHistoryChanged,
+  onExamFinished,
 }: Props) {
   const { width } = useWindowDimensions();
   const isWide = width >= 720;
@@ -97,6 +117,13 @@ export function ExampleSolveModal({
   const [batchHistorySaved, setBatchHistorySaved] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportNotice, setReportNotice] = useState<string | null>(null);
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
+  const [examCloseConfirmOpen, setExamCloseConfirmOpen] = useState(false);
+  const [examDrafts, setExamDrafts] = useState<
+    Array<{ selectedIds: string[]; descriptiveDraft: string } | null>
+  >([]);
+  const examFinishedRef = useRef(false);
 
   const initialMessagesRef = useRef(initialMessages);
   initialMessagesRef.current = initialMessages;
@@ -104,6 +131,26 @@ export function ExampleSolveModal({
   resumeModeRef.current = resumeMode;
   const historyIdRef = useRef(historyId);
   historyIdRef.current = historyId;
+  const batchResultsRef = useRef(batchResults);
+  batchResultsRef.current = batchResults;
+  const exampleRef = useRef(example);
+  exampleRef.current = example;
+  const queueIndexRef = useRef(queueIndex);
+  queueIndexRef.current = queueIndex;
+  const showBatchSummaryRef = useRef(showBatchSummary);
+  showBatchSummaryRef.current = showBatchSummary;
+  const batchHistorySavedRef = useRef(batchHistorySaved);
+  batchHistorySavedRef.current = batchHistorySaved;
+  const timedOutRef = useRef(false);
+  const examDraftsRef = useRef(examDrafts);
+  examDraftsRef.current = examDrafts;
+  const examChoicesCacheRef = useRef<Map<string, DisplayChoice[]>>(new Map());
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const descriptiveDraftRef = useRef(descriptiveDraft);
+  descriptiveDraftRef.current = descriptiveDraft;
+  const choicesRef = useRef(choices);
+  choicesRef.current = choices;
 
   const exampleId = exampleIds[queueIndex] ?? null;
   const queueTotal = exampleIds.length;
@@ -119,15 +166,45 @@ export function ExampleSolveModal({
       setBatchHistorySaved(false);
       setReportOpen(false);
       setReportNotice(null);
+      setRemainingSeconds(null);
+      setTimedOut(false);
+      timedOutRef.current = false;
+      setExamDrafts([]);
+      setExamCloseConfirmOpen(false);
+      examFinishedRef.current = false;
+      examChoicesCacheRef.current = new Map();
       return;
     }
     setQueueIndex(0);
     setBatchResults(Array.from({ length: exampleIds.length }, () => null));
+    setExamDrafts(Array.from({ length: exampleIds.length }, () => null));
     setShowBatchSummary(false);
     setBatchHistorySaved(false);
     setReportOpen(false);
     setReportNotice(null);
+    setTimedOut(false);
+    timedOutRef.current = false;
+    setExamCloseConfirmOpen(false);
+    examFinishedRef.current = false;
+    examChoicesCacheRef.current = new Map();
   }, [visible, exampleIds.join('|')]);
+
+  useEffect(() => {
+    if (!visible || !timeLimitSeconds || timeLimitSeconds <= 0) {
+      setRemainingSeconds(null);
+      return;
+    }
+    const endsAt = Date.now() + timeLimitSeconds * 1000;
+    setRemainingSeconds(timeLimitSeconds);
+    const timerId = setInterval(() => {
+      const left = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+      setRemainingSeconds(left);
+      if (left <= 0) {
+        clearInterval(timerId);
+      }
+    }, 250);
+    return () => clearInterval(timerId);
+  }, [visible, timeLimitSeconds, exampleIds.join('|')]);
 
   useEffect(() => {
     if (!visible || !exampleId) {
@@ -161,7 +238,7 @@ export function ExampleSolveModal({
     setNotice(null);
 
     const isFirstInSession = queueIndex === 0;
-    const shouldResume = isFirstInSession && resumeModeRef.current;
+    const shouldResume = isFirstInSession && resumeModeRef.current && !examMode;
     setRevealed(shouldResume);
     setChatOpen(shouldResume);
     setChatMessages(shouldResume ? [...initialMessagesRef.current] : []);
@@ -172,15 +249,33 @@ export function ExampleSolveModal({
         const detail = await fetchExampleDetail(exampleId);
         if (cancelled) return;
         setExample(detail);
-        const baseChoices = shouldResume
-          ? detail.choices
-          : shuffleChoices(detail.choices);
-        const labeled = baseChoices.map((choice, index) => ({
-          ...choice,
-          label: toChoiceLabel(index),
-        }));
+
+        let labeled: DisplayChoice[];
+        const cached = examMode
+          ? examChoicesCacheRef.current.get(exampleId)
+          : undefined;
+        if (cached) {
+          labeled = cached;
+        } else {
+          const baseChoices = shouldResume
+            ? detail.choices
+            : shuffleChoices(detail.choices);
+          labeled = baseChoices.map((choice, index) => ({
+            ...choice,
+            label: toChoiceLabel(index),
+          }));
+          if (examMode) {
+            examChoicesCacheRef.current.set(exampleId, labeled);
+          }
+        }
         setChoices(labeled);
-        if (shouldResume) {
+
+        if (examMode) {
+          const draft = examDraftsRef.current[queueIndex];
+          setSelectedIds(draft?.selectedIds ?? []);
+          setDescriptiveDraft(draft?.descriptiveDraft ?? '');
+          setRevealed(false);
+        } else if (shouldResume) {
           setSelectedIds(labeled.filter((c) => c.isAnswer).map((c) => c.id));
         }
       } catch (err) {
@@ -194,7 +289,7 @@ export function ExampleSolveModal({
     return () => {
       cancelled = true;
     };
-  }, [visible, exampleId, queueIndex]);
+  }, [visible, exampleId, queueIndex, examMode]);
 
   const isSelect = example ? isSelectExample(example) : false;
   const correctCount = useMemo(
@@ -202,6 +297,7 @@ export function ExampleSolveModal({
     [choices],
   );
   const isMultiple = isSelect && correctCount >= 2;
+  const requiredSelectCount = isSelect ? Math.max(1, correctCount) : 0;
 
   const correctLabels = useMemo(
     () =>
@@ -212,19 +308,31 @@ export function ExampleSolveModal({
     [choices],
   );
 
+  const isSelectionComplete = (ids: string[], required: number) => {
+    if (required <= 0) return false;
+    return ids.length === required;
+  };
+
   const toggleChoice = (id: string) => {
-    if (revealed) return;
+    if (revealed && !examMode) return;
     if (!isMultiple) {
       setSelectedIds([id]);
       return;
     }
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((x) => x !== id);
+      }
+      // 必要数に達したら、解除するまで追加不可
+      if (prev.length >= requiredSelectCount) {
+        return prev;
+      }
+      return [...prev, id];
+    });
   };
 
   const canCheck = isSelect
-    ? selectedIds.length > 0
+    ? isSelectionComplete(selectedIds, requiredSelectCount)
     : descriptiveDraft.trim().length > 0;
 
   const evaluateCurrentAnswer = (): boolean => {
@@ -242,6 +350,7 @@ export function ExampleSolveModal({
   };
 
   const handleCheck = () => {
+    if (examMode) return;
     if (!canCheck || !example || !exampleId) return;
     const correct = evaluateCurrentAnswer();
     if (isBatch) {
@@ -264,6 +373,142 @@ export function ExampleSolveModal({
         console.error('[ExampleSolveModal] srs card', err);
       });
     }
+  };
+
+  const commitExamProgressAt = (args: {
+    index: number;
+    exampleId: string;
+    example: ExampleDetail;
+    choices: DisplayChoice[];
+    selectedIds: string[];
+    descriptiveDraft: string;
+  }): ExampleBatchResultItem | null => {
+    const {
+      index,
+      exampleId: id,
+      example: ex,
+      choices: ch,
+      selectedIds: ids,
+      descriptiveDraft: desc,
+    } = args;
+
+    const draft = { selectedIds: [...ids], descriptiveDraft: desc };
+    const select = isSelectExample(ex);
+    const required = select
+      ? Math.max(1, ch.filter((c) => c.isAnswer).length)
+      : 0;
+    const hasPartialOrMore = select
+      ? ids.length > 0
+      : desc.trim().length > 0;
+    // 複数選択は必要数ちょうど選んだときだけ「回答済み」
+    const answered = select
+      ? ids.length === required
+      : desc.trim().length > 0;
+
+    setExamDrafts((prev) => {
+      const next = [...prev];
+      while (next.length < queueTotal) next.push(null);
+      // 途中選択は下書きとして残すが、回答済みにはしない
+      next[index] = hasPartialOrMore ? draft : null;
+      examDraftsRef.current = next;
+      return next;
+    });
+
+    let result: ExampleBatchResultItem | null = null;
+    if (answered) {
+      let correct = false;
+      if (select) {
+        const correctIds = ch.filter((c) => c.isAnswer).map((c) => c.id);
+        if (ids.length === correctIds.length) {
+          const selectedSet = new Set(ids);
+          correct = correctIds.every((cid) => selectedSet.has(cid));
+        }
+      } else {
+        correct =
+          desc.trim().replace(/\s+/g, '') ===
+          ex.answer.trim().replace(/\s+/g, '');
+      }
+      result = {
+        example_id: id,
+        title: ex.title || '無題の例題',
+        correct,
+      };
+    }
+
+    setBatchResults((prev) => {
+      const next = [...prev];
+      while (next.length < queueTotal) next.push(null);
+      next[index] = result;
+      batchResultsRef.current = next;
+      return next;
+    });
+    return result;
+  };
+
+  const commitCurrentExamProgress = () => {
+    if (!examMode || !example || !exampleId) return;
+    commitExamProgressAt({
+      index: queueIndex,
+      exampleId,
+      example,
+      choices,
+      selectedIds: selectedIdsRef.current,
+      descriptiveDraft: descriptiveDraftRef.current,
+    });
+  };
+
+  const jumpToExamQuestion = (nextIndex: number) => {
+    if (!examMode || showBatchSummary || closingBusy || loading) return;
+    if (nextIndex < 0 || nextIndex >= queueTotal || nextIndex === queueIndex) {
+      return;
+    }
+    commitCurrentExamProgress();
+    setQueueIndex(nextIndex);
+  };
+
+  const buildFilledExamResults = (): ExampleBatchResultItem[] => {
+    commitCurrentExamProgress();
+    return exampleIds.map((id, index) => {
+      const existing = batchResultsRef.current[index];
+      if (existing != null) return existing;
+      return {
+        example_id: id,
+        title: examDraftsRef.current[index] ? '解答済み' : '未解答',
+        correct: false,
+      };
+    });
+  };
+
+  const persistFilledExamResults = (filled: ExampleBatchResultItem[]) => {
+    if (batchHistorySavedRef.current) return;
+    void (async () => {
+      try {
+        await insertExampleBatchHistory({
+          certificationId,
+          results: filled,
+          examMode: true,
+        });
+        setBatchHistorySaved(true);
+        onHistoryChanged?.();
+      } catch (err) {
+        console.error('[solve] persist exam results', err);
+        setNotice(
+          getExampleErrorMessage(err, '実施履歴の保存に失敗しました。'),
+        );
+      }
+    })();
+  };
+
+  const handleExamGrade = () => {
+    if (!examMode || showBatchSummary || closingBusy) return;
+    const filled = buildFilledExamResults();
+    setBatchResults(filled);
+    batchResultsRef.current = filled;
+    setChatOpen(false);
+    setShowBatchSummary(true);
+    setNotice('採点しました。試験中は正解を表示していません。');
+    examFinishedRef.current = true;
+    persistFilledExamResults(filled);
   };
 
   const batchCorrectCount = useMemo(
@@ -319,6 +564,9 @@ export function ExampleSolveModal({
     void (async () => {
       setClosingBusy(true);
       try {
+        if (examMode && !showBatchSummary) {
+          commitCurrentExamProgress();
+        }
         await persistHistoryIfNeeded();
         await persistBatchHistoryIfNeeded();
       } catch (err) {
@@ -329,9 +577,25 @@ export function ExampleSolveModal({
         setClosingBusy(false);
         return;
       }
+      const shouldNotifyExamFinished =
+        examMode && (showBatchSummary || examFinishedRef.current);
+      const finishedIds = [...exampleIds];
       setClosingBusy(false);
+      setExamCloseConfirmOpen(false);
       onClose();
+      if (shouldNotifyExamFinished) {
+        onExamFinished?.({ exampleIds: finishedIds });
+      }
     })();
+  };
+
+  const requestClose = () => {
+    if (chatSending || diagramBusy || closingBusy) return;
+    if (examMode && !showBatchSummary) {
+      setExamCloseConfirmOpen(true);
+      return;
+    }
+    handleClose();
   };
 
   const handleNextQuestion = () => {
@@ -373,6 +637,59 @@ export function ExampleSolveModal({
       setShowBatchSummary(true);
     })();
   };
+
+  const finishDueToTimeout = () => {
+    if (timedOutRef.current || showBatchSummaryRef.current) return;
+    timedOutRef.current = true;
+    setTimedOut(true);
+
+    const filled = examMode
+      ? buildFilledExamResults().map((item) =>
+          item.title === '未解答'
+            ? { ...item, title: '未解答（時間切れ）' }
+            : item,
+        )
+      : batchResultsRef.current.map((item, index) => {
+          if (item != null) return item;
+          const id = exampleIds[index];
+          if (!id) {
+            return {
+              example_id: `missing-${index}`,
+              title: '未解答（時間切れ）',
+              correct: false,
+            };
+          }
+          const currentExample = exampleRef.current;
+          const currentIndex = queueIndexRef.current;
+          return {
+            example_id: id,
+            title:
+              index === currentIndex && currentExample
+                ? currentExample.title || '無題の例題'
+                : '未解答（時間切れ）',
+            correct: false,
+          };
+        });
+
+    setBatchResults(filled);
+    batchResultsRef.current = filled;
+    setChatOpen(false);
+    setRevealed(false);
+    setShowBatchSummary(true);
+    setNotice(
+      '制限時間が終了しました。未解答は不正解として集計します。',
+    );
+    if (examMode) {
+      examFinishedRef.current = true;
+    }
+    persistFilledExamResults(filled);
+  };
+
+  useEffect(() => {
+    if (remainingSeconds !== 0) return;
+    if (!timeLimitSeconds || timeLimitSeconds <= 0) return;
+    finishDueToTimeout();
+  }, [remainingSeconds, timeLimitSeconds]);
 
   const handleToggleChat = () => {
     if (chatSending || diagramBusy) return;
@@ -447,22 +764,28 @@ export function ExampleSolveModal({
 
   const examplePanel = example ? (
     <View style={styles.panel}>
-      <View style={styles.panelHeader}>
-        <View style={styles.panelIcon}>
-          <Text style={styles.panelIconLabel}>例</Text>
+      {examMode ? null : (
+        <View style={styles.panelHeader}>
+          <View style={styles.panelIcon}>
+            <Text style={styles.panelIconLabel}>例</Text>
+          </View>
+          <Text style={styles.panelTitle}>例題</Text>
         </View>
-        <Text style={styles.panelTitle}>例題</Text>
-      </View>
+      )}
 
-      {example.title ? (
+      {!examMode && example.title ? (
         <Text style={styles.exampleTitle}>{example.title}</Text>
       ) : null}
 
-      <Text style={styles.categoryLabel}>
-        カテゴリ: {example.categoryName?.trim() || '未分類'}
-      </Text>
+      {examMode ? null : (
+        <Text style={styles.categoryLabel}>
+          カテゴリ: {example.categoryName?.trim() || '未分類'}
+        </Text>
+      )}
 
-      <Text style={styles.questionText}>Q. {example.question}</Text>
+      <Text style={styles.questionText}>
+        {examMode ? example.question : `Q. ${example.question}`}
+      </Text>
 
       {example.questionImageUrls.length > 0 ? (
         <View style={styles.questionImages}>
@@ -480,10 +803,26 @@ export function ExampleSolveModal({
 
       {isSelect ? (
         <View style={styles.choiceList}>
+          {isMultiple && !showBatchSummary ? (
+            <Text style={styles.multiHint}>
+              複数選択（正解は {correctCount} つ
+              {selectedIds.length >= correctCount
+                ? '・選択完了。外してから変更できます'
+                : `・あと ${Math.max(0, correctCount - selectedIds.length)} つ`}
+              ）
+            </Text>
+          ) : null}
           {choices.map((choice) => {
             const selected = selectedIds.includes(choice.id);
-            const showCorrect = revealed && choice.isAnswer;
-            const showWrong = revealed && selected && !choice.isAnswer;
+            const showCorrect = revealed && !examMode && choice.isAnswer;
+            const showWrong =
+              revealed && !examMode && selected && !choice.isAnswer;
+            const multiLocked =
+              isMultiple &&
+              !selected &&
+              selectedIds.length >= requiredSelectCount;
+            const choiceDisabled =
+              (revealed && !examMode) || multiLocked;
             return (
               <Pressable
                 key={choice.id}
@@ -491,14 +830,16 @@ export function ExampleSolveModal({
                 accessibilityState={{
                   selected,
                   checked: selected,
+                  disabled: choiceDisabled,
                 }}
-                disabled={revealed}
+                disabled={choiceDisabled}
                 onPress={() => toggleChoice(choice.id)}
                 style={[
                   styles.choiceRow,
-                  selected && !revealed && styles.choiceRowSelected,
+                  selected && !(revealed && !examMode) && styles.choiceRowSelected,
                   showCorrect && styles.choiceRowCorrect,
                   showWrong && styles.choiceRowWrong,
+                  multiLocked && styles.choiceRowLocked,
                 ]}
               >
                 <View
@@ -536,9 +877,9 @@ export function ExampleSolveModal({
       ) : (
         <View style={styles.descriptiveWrap}>
           <Text style={styles.fieldHint}>
-            {revealed ? '模範解答' : '解答を入力してください'}
+            {revealed && !examMode ? '模範解答' : '解答を入力してください'}
           </Text>
-          {revealed ? (
+          {revealed && !examMode ? (
             <Text style={styles.modelAnswer}>{example.answer}</Text>
           ) : (
             <TextInput
@@ -551,7 +892,7 @@ export function ExampleSolveModal({
               textAlignVertical="top"
             />
           )}
-          {revealed && descriptiveDraft.trim() ? (
+          {revealed && !examMode && descriptiveDraft.trim() ? (
             <View style={styles.yourAnswerBox}>
               <Text style={styles.yourAnswerLabel}>あなたの解答</Text>
               <Text style={styles.yourAnswerText}>
@@ -562,7 +903,7 @@ export function ExampleSolveModal({
         </View>
       )}
 
-      {revealed && isSelect ? (
+      {revealed && !examMode && isSelect ? (
         <View style={styles.answerBadge}>
           <Text style={styles.answerBadgeLabel}>
             正解: {correctLabels || '—'}
@@ -573,7 +914,7 @@ export function ExampleSolveModal({
   ) : null;
 
   const explainPanel =
-    example && revealed ? (
+    example && revealed && !examMode ? (
       <View style={styles.panel}>
         <View style={styles.panelHeader}>
           <View style={styles.panelIcon}>
@@ -732,36 +1073,55 @@ export function ExampleSolveModal({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={handleClose}
+      onRequestClose={requestClose}
     >
-      <View style={styles.overlay}>
+      <View style={[styles.overlay, examMode && styles.overlayExam]}>
         <Pressable
           style={styles.backdrop}
           onPress={() => {
-            if (!closeLocked) handleClose();
+            if (!closeLocked) requestClose();
           }}
         />
         <View
           style={[
             styles.card,
-            (revealed || chatOpen || showBatchSummary) && styles.cardTall,
-            chatOpen
-              ? isWide
-                ? styles.cardExpandedWide
-                : styles.cardExpandedNarrow
-              : isWide
-                ? styles.cardWide
-                : styles.cardNarrow,
+            (revealed || chatOpen || showBatchSummary || examMode) &&
+              styles.cardTall,
+            examMode
+              ? [styles.cardExam, { width: width * 0.9, maxWidth: width * 0.9 }]
+              : chatOpen
+                ? isWide
+                  ? styles.cardExpandedWide
+                  : styles.cardExpandedNarrow
+                : isWide
+                  ? styles.cardWide
+                  : styles.cardNarrow,
           ]}
         >
           <View style={styles.header}>
-            <Text style={styles.title}>
-              {showBatchSummary
-                ? '解答結果'
-                : isBatch
-                  ? `例題を解く（${queueIndex + 1}/${queueTotal}）`
-                  : '例題を解く'}
-            </Text>
+            <View style={styles.headerTitleBlock}>
+              <Text style={styles.title}>
+                {showBatchSummary
+                  ? timedOut
+                    ? '時間切れ・解答結果'
+                    : '解答結果'
+                  : examMode
+                    ? `本番試験（${queueIndex + 1}/${queueTotal}）`
+                    : isBatch
+                      ? `例題を解く（${queueIndex + 1}/${queueTotal}）`
+                      : '例題を解く'}
+              </Text>
+              {remainingSeconds != null && !showBatchSummary ? (
+                <Text
+                  style={[
+                    styles.timerText,
+                    remainingSeconds <= 5 * 60 && styles.timerTextUrgent,
+                  ]}
+                >
+                  残り {formatCountdown(remainingSeconds)}
+                </Text>
+              ) : null}
+            </View>
             <View style={styles.headerActions}>
               {example && !showBatchSummary && !loading && !error ? (
                 <Pressable
@@ -781,7 +1141,7 @@ export function ExampleSolveModal({
               accessibilityRole="button"
               accessibilityLabel="閉じる"
               disabled={closeLocked}
-              onPress={handleClose}
+              onPress={requestClose}
               style={({ pressed }) => [
                 styles.closeButton,
                 pressed && !closeLocked && styles.closeButtonPressed,
@@ -804,7 +1164,11 @@ export function ExampleSolveModal({
             </View>
           ) : showBatchSummary ? (
             <View style={styles.summaryBox}>
-              <Text style={styles.summaryLead}>全問の解答が終わりました</Text>
+              <Text style={styles.summaryLead}>
+                {timedOut
+                  ? '制限時間により試験を終了しました'
+                  : '全問の解答が終わりました'}
+              </Text>
               <Text style={styles.summaryScore}>
                 {queueTotal}問中 {batchCorrectCount}問正解
               </Text>
@@ -890,7 +1254,169 @@ export function ExampleSolveModal({
             </View>
           ) : null}
 
-          {!showBatchSummary && !revealed && example && !loading && !error ? (
+          {!showBatchSummary &&
+          examMode &&
+          example &&
+          !loading &&
+          !error ? (
+            <View style={styles.examNavSection}>
+              <ScrollView
+                horizontal
+                nestedScrollEnabled
+                showsHorizontalScrollIndicator
+                style={styles.examJumpScroll}
+                contentContainerStyle={styles.examJumpList}
+                keyboardShouldPersistTaps="handled"
+              >
+                {exampleIds.map((_, index) => {
+                  const liveAnswered =
+                    index === queueIndex &&
+                    (isSelect
+                      ? isSelectionComplete(selectedIds, requiredSelectCount)
+                      : descriptiveDraft.trim().length > 0);
+                  const livePartial =
+                    index === queueIndex &&
+                    isSelect &&
+                    isMultiple &&
+                    selectedIds.length > 0 &&
+                    selectedIds.length < requiredSelectCount;
+                  const draft = examDrafts[index];
+                  const draftHasSelection =
+                    draft != null &&
+                    (draft.selectedIds.length > 0 ||
+                      draft.descriptiveDraft.trim().length > 0);
+                  // 回答済みは batchResults のみ（複数選択の途中はここに入らない）
+                  const answered =
+                    batchResults[index] != null || liveAnswered;
+                  const partial =
+                    !answered &&
+                    (livePartial ||
+                      (index !== queueIndex &&
+                        draftHasSelection &&
+                        batchResults[index] == null));
+                  const current = index === queueIndex;
+                  return (
+                    <Pressable
+                      key={`jump-${index}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        answered
+                          ? `第${index + 1}問（回答済み）`
+                          : partial
+                            ? `第${index + 1}問（選択途中）`
+                            : `第${index + 1}問（未回答）`
+                      }
+                      disabled={closeLocked}
+                      onPress={() => jumpToExamQuestion(index)}
+                      style={[
+                        styles.examJumpChip,
+                        current && styles.examJumpChipCurrent,
+                        answered && !current && styles.examJumpChipAnswered,
+                        partial && !current && styles.examJumpChipPartial,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.examJumpChipLabel,
+                          current && styles.examJumpChipLabelCurrent,
+                          answered && !current && styles.examJumpChipLabelAnswered,
+                        ]}
+                      >
+                        {index + 1}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <Text style={styles.examJumpHint}>
+                左右にスクロールして問題番号を選べます（{queueIndex + 1}/
+                {queueTotal}）／緑=回答済み・薄色=選択途中
+              </Text>
+              <View style={styles.examFooterRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={closeLocked || queueIndex <= 0}
+                  onPress={() => jumpToExamQuestion(queueIndex - 1)}
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    styles.examNavButton,
+                    pressed &&
+                      !closeLocked &&
+                      queueIndex > 0 &&
+                      styles.secondaryButtonPressed,
+                    (closeLocked || queueIndex <= 0) &&
+                      styles.secondaryButtonDisabled,
+                  ]}
+                >
+                  <Text style={styles.secondaryButtonLabel}>前の問題</Text>
+                </Pressable>
+                {queueIndex < queueTotal - 1 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={closeLocked}
+                    onPress={() => jumpToExamQuestion(queueIndex + 1)}
+                    style={({ pressed }) => [
+                      styles.primaryButton,
+                      styles.examNavButton,
+                      pressed && !closeLocked && styles.primaryButtonPressed,
+                      closeLocked && styles.primaryButtonDisabled,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.primaryButtonLabel,
+                        closeLocked && styles.primaryButtonLabelDisabled,
+                      ]}
+                    >
+                      次の問題
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={closeLocked}
+                    onPress={handleExamGrade}
+                    style={({ pressed }) => [
+                      styles.primaryButton,
+                      styles.examNavButton,
+                      pressed && !closeLocked && styles.primaryButtonPressed,
+                      closeLocked && styles.primaryButtonDisabled,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.primaryButtonLabel,
+                        closeLocked && styles.primaryButtonLabelDisabled,
+                      ]}
+                    >
+                      採点する
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                disabled={closeLocked}
+                onPress={handleExamGrade}
+                style={({ pressed }) => [
+                  styles.examGradeLink,
+                  pressed && !closeLocked && styles.examGradeLinkPressed,
+                  closeLocked && styles.secondaryButtonDisabled,
+                ]}
+              >
+                <Text style={styles.examGradeLinkLabel}>
+                  途中でも採点して終了
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {!showBatchSummary &&
+          !examMode &&
+          !revealed &&
+          example &&
+          !loading &&
+          !error ? (
             <View style={styles.footer}>
               <Pressable
                 accessibilityRole="button"
@@ -915,6 +1441,7 @@ export function ExampleSolveModal({
           ) : null}
 
           {!showBatchSummary &&
+          !examMode &&
           revealed &&
           hasNext &&
           example &&
@@ -944,6 +1471,7 @@ export function ExampleSolveModal({
           ) : null}
 
           {!showBatchSummary &&
+          !examMode &&
           revealed &&
           isLastInBatch &&
           example &&
@@ -1038,6 +1566,48 @@ export function ExampleSolveModal({
       ) : null}
 
       <Modal
+        visible={examCloseConfirmOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setExamCloseConfirmOpen(false)}
+      >
+        <View style={styles.noticeOverlay}>
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setExamCloseConfirmOpen(false)}
+          />
+          <View style={styles.noticeCard}>
+            <Text style={styles.noticeTitle}>試験を終了しますか？</Text>
+            <Text style={styles.noticeBody}>
+              閉じると1問目からやり直しになりますが、よろしいですか？
+            </Text>
+            <View style={styles.examCloseConfirmActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setExamCloseConfirmOpen(false)}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed && styles.secondaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.secondaryButtonLabel}>キャンセル</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={handleClose}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.primaryButtonPressed,
+                ]}
+              >
+                <Text style={styles.primaryButtonLabel}>閉じる</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={reportNotice != null}
         transparent
         animationType="fade"
@@ -1075,6 +1645,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 24,
   },
+  overlayExam: {
+    paddingHorizontal: 0,
+  },
   backdrop: {
     ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(16, 42, 67, 0.45)',
@@ -1098,6 +1671,9 @@ const styles = StyleSheet.create({
   cardNarrow: {
     maxWidth: 520,
   },
+  cardExam: {
+    alignSelf: 'center',
+  },
   cardExpandedWide: {
     maxWidth: 980,
   },
@@ -1113,11 +1689,23 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     gap: 10,
   },
-  title: {
+  headerTitleBlock: {
     flex: 1,
+    gap: 2,
+  },
+  title: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 20,
     color: colors.ink,
+  },
+  timerText: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.inkSoft,
+    letterSpacing: 0.3,
+  },
+  timerTextUrgent: {
+    color: colors.spotlight,
   },
   headerActions: {
     flexDirection: 'row',
@@ -1364,6 +1952,12 @@ const styles = StyleSheet.create({
   choiceList: {
     gap: 10,
   },
+  multiHint: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.spotlightDeep,
+    marginBottom: 2,
+  },
   choiceRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1378,6 +1972,9 @@ const styles = StyleSheet.create({
   choiceRowSelected: {
     borderColor: colors.accent,
     backgroundColor: colors.accentSoft,
+  },
+  choiceRowLocked: {
+    opacity: 0.45,
   },
   choiceRowCorrect: {
     borderColor: colors.accent,
@@ -1744,6 +2341,96 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  examNavSection: {
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    paddingTop: 12,
+    paddingBottom: 14,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  examJumpScroll: {
+    width: '100%',
+    flexGrow: 0,
+    flexShrink: 0,
+    ...(Platform.OS === 'web'
+      ? ({ overflowX: 'auto', overflowY: 'hidden' } as object)
+      : null),
+  },
+  examJumpList: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 4,
+    paddingBottom: 6,
+    paddingRight: 16,
+  },
+  examJumpHint: {
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 11,
+    color: colors.muted,
+  },
+  examJumpChip: {
+    minWidth: 34,
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.mist,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 0,
+    flexShrink: 0,
+  },
+  examJumpChipCurrent: {
+    borderColor: colors.spotlight,
+    backgroundColor: colors.spotlight,
+  },
+  examJumpChipAnswered: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
+  examJumpChipPartial: {
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+    borderStyle: 'dashed',
+  },
+  examJumpChipLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.inkSoft,
+  },
+  examJumpChipLabelCurrent: {
+    color: colors.paper,
+  },
+  examJumpChipLabelAnswered: {
+    color: colors.accentDeep,
+  },
+  examFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  examNavButton: {
+    flex: 1,
+    maxWidth: 200,
+  },
+  examGradeLink: {
+    alignSelf: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  examGradeLinkPressed: {
+    opacity: 0.7,
+  },
+  examGradeLinkLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.inkSoft,
+    textDecorationLine: 'underline',
+  },
   primaryButton: {
     backgroundColor: colors.accent,
     borderRadius: 12,
@@ -1781,6 +2468,12 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 420,
     gap: 12,
+  },
+  examCloseConfirmActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 4,
   },
   noticeTitle: {
     fontFamily: 'NotoSansJP_700Bold',

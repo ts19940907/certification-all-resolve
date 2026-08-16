@@ -989,6 +989,7 @@ Deno.serve(async (req) => {
       .from('examples')
       .insert({
         certification_id: certificationId,
+        user_id: user.id,
         title: draft.title || '無題の例題',
         question: draft.question || '（問題文未設定）',
         answer: draft.answer,

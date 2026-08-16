@@ -56,7 +56,28 @@ function mapChoice(row: SelectAnswerRow): SelectAnswer {
 export async function fetchExamples(
   certificationId: string,
 ): Promise<ExampleSummary[]> {
-  const { data, error } = await supabase
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError) throw userError;
+  if (!user) throw new Error('ログインが必要です。');
+
+  const { data: libraryRows, error: libraryError } = await supabase
+    .from('user_example_library')
+    .select('example_id')
+    .eq('user_id', user.id);
+
+  if (libraryError) {
+    console.error('[examples] library', libraryError);
+    throw libraryError;
+  }
+
+  const libraryIds = (libraryRows ?? [])
+    .map((row) => row.example_id as string)
+    .filter(Boolean);
+
+  let query = supabase
     .from('examples')
     .select(
       `
@@ -71,6 +92,15 @@ export async function fetchExamples(
     )
     .eq('certification_id', certificationId)
     .order('created_at', { ascending: false });
+
+  if (libraryIds.length > 0) {
+    const inList = libraryIds.join(',');
+    query = query.or(`user_id.eq.${user.id},id.in.(${inList})`);
+  } else {
+    query = query.eq('user_id', user.id);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('[examples] fetch', error);
@@ -415,4 +445,87 @@ export async function generateExampleDiagram(args: {
 
 export function getDiagramErrorMessage(error: unknown) {
   return getErrorMessage(error, '図解の作成に失敗しました');
+}
+
+/**
+ * 共有バンク例題を個人ライブラリへ取り込む。
+ * 既に取り込み済みの ID はスキップする。
+ * @returns 新規に取り込んだ件数
+ */
+export async function importBankExamplesToLibrary(
+  exampleIds: string[],
+): Promise<number> {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError) throw userError;
+  if (!user) throw new Error('ログインが必要です。');
+
+  const uniqueIds = [...new Set(exampleIds.filter(Boolean))];
+  if (uniqueIds.length === 0) return 0;
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from('user_example_library')
+    .select('example_id')
+    .eq('user_id', user.id)
+    .in('example_id', uniqueIds);
+
+  if (existingError) {
+    console.error('[examples] library existing', existingError);
+    throw existingError;
+  }
+
+  const already = new Set(
+    (existingRows ?? []).map((row) => row.example_id as string),
+  );
+  const toInsert = uniqueIds.filter((id) => !already.has(id));
+  if (toInsert.length === 0) return 0;
+
+  const { error: insertError } = await supabase
+    .from('user_example_library')
+    .insert(
+      toInsert.map((exampleId) => ({
+        user_id: user.id,
+        example_id: exampleId,
+      })),
+    );
+
+  if (insertError) {
+    console.error('[examples] library import', insertError);
+    throw insertError;
+  }
+
+  return toInsert.length;
+}
+
+/** まだライブラリ未取り込みの ID だけ返す */
+export async function filterUnimportedBankExampleIds(
+  exampleIds: string[],
+): Promise<string[]> {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError) throw userError;
+  if (!user) throw new Error('ログインが必要です。');
+
+  const uniqueIds = [...new Set(exampleIds.filter(Boolean))];
+  if (uniqueIds.length === 0) return [];
+
+  const { data: existingRows, error } = await supabase
+    .from('user_example_library')
+    .select('example_id')
+    .eq('user_id', user.id)
+    .in('example_id', uniqueIds);
+
+  if (error) {
+    console.error('[examples] filter unimported', error);
+    throw error;
+  }
+
+  const already = new Set(
+    (existingRows ?? []).map((row) => row.example_id as string),
+  );
+  return uniqueIds.filter((id) => !already.has(id));
 }

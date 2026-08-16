@@ -18,6 +18,10 @@
         --info-line: #b7cff5;
         --warn-bg: #fff6ee;
         --warn-line: #f0c49a;
+        --ok-bg: #eef8f0;
+        --ok-line: #b5d9bc;
+        --todo-bg: #f7f2ff;
+        --todo-line: #d4c4f0;
       }
 
       * {
@@ -56,6 +60,11 @@
         margin: 0 0 8px;
       }
 
+      h4 {
+        font-size: 0.95rem;
+        margin: 0 0 6px;
+      }
+
       p {
         margin: 0 0 12px;
       }
@@ -89,6 +98,32 @@
         margin-bottom: 0;
       }
 
+      .toc {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px 18px;
+        margin-bottom: 28px;
+      }
+
+      .toc ol {
+        margin: 8px 0 0;
+        padding-left: 1.3em;
+      }
+
+      .toc li + li {
+        margin-top: 4px;
+      }
+
+      .toc a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .toc a:hover {
+        text-decoration: underline;
+      }
+
       .callout {
         border: 1px solid var(--line);
         background: var(--paper);
@@ -107,6 +142,16 @@
         border-color: var(--warn-line);
       }
 
+      .callout.ok {
+        background: var(--ok-bg);
+        border-color: var(--ok-line);
+      }
+
+      .callout.todo {
+        background: var(--todo-bg);
+        border-color: var(--todo-line);
+      }
+
       .callout strong.title {
         display: block;
         margin-bottom: 6px;
@@ -115,6 +160,12 @@
       .grid-2 {
         display: grid;
         grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .grid-3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
         gap: 12px;
       }
 
@@ -147,8 +198,8 @@
       }
 
       .flow-step {
-        flex: 1 1 140px;
-        min-width: 130px;
+        flex: 1 1 100px;
+        min-width: 110px;
         background: var(--accent-soft);
         border: 1px solid #b9d9d5;
         border-radius: 12px;
@@ -163,13 +214,13 @@
 
       .flow-step h3 {
         margin-top: 4px;
-        font-size: 0.95rem;
+        font-size: 0.92rem;
       }
 
       .flow-step p {
         margin: 0;
         color: var(--muted);
-        font-size: 0.84rem;
+        font-size: 0.82rem;
         line-height: 1.5;
       }
 
@@ -207,8 +258,8 @@
         justify-content: center;
       }
 
-      .step-head h3 {
-        margin: 2px 0 4px;
+      .step-num.new {
+        background: var(--spotlight);
       }
 
       .muted {
@@ -247,6 +298,22 @@
         font-size: 0.92rem;
       }
 
+      .why-box {
+        margin-top: 10px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: var(--warn-bg);
+        border: 1px solid var(--warn-line);
+        font-size: 0.9rem;
+      }
+
+      .why-box strong {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--spotlight);
+        font-size: 0.82rem;
+      }
+
       .main-map {
         display: grid;
         grid-template-columns: 1fr 1.2fr 1fr;
@@ -274,6 +341,39 @@
         line-height: 1.5;
       }
 
+      .header-map {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0 4px;
+      }
+
+      .header-chip {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+        flex: 1 1 140px;
+        min-width: 130px;
+      }
+
+      .header-chip h4 {
+        margin: 0 0 4px;
+        font-size: 0.88rem;
+      }
+
+      .header-chip p {
+        margin: 0;
+        font-size: 0.8rem;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .header-chip.hot {
+        border-color: #f0c49a;
+        background: var(--warn-bg);
+      }
+
       .badge {
         display: inline-block;
         font-size: 0.72rem;
@@ -295,6 +395,43 @@
         color: var(--spotlight);
       }
 
+      .badge.new {
+        background: #fde8e1;
+        color: var(--spotlight);
+      }
+
+      .badge.done {
+        background: var(--ok-bg);
+        color: #2d6b3a;
+      }
+
+      .badge.todo {
+        background: var(--todo-bg);
+        color: #6b4a9e;
+      }
+
+      .status-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0 0;
+      }
+
+      .status-item {
+        flex: 1 1 200px;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px 16px;
+      }
+
+      .status-item p {
+        margin: 0;
+        font-size: 0.88rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
       hr {
         border: 0;
         border-top: 1px solid var(--line);
@@ -303,6 +440,7 @@
 
       @media (max-width: 760px) {
         .grid-2,
+        .grid-3,
         .main-map {
           grid-template-columns: 1fr;
         }
@@ -319,10 +457,7 @@
           background: #fff;
         }
 
-        .shot {
-          break-inside: avoid;
-        }
-
+        .shot,
         .step-block {
           break-inside: avoid;
         }
@@ -331,20 +466,33 @@
   </head>
   <body>
     <main>
-      <p class="hero-label">卒業制作｜ツール概要</p>
+      <p class="hero-label">卒業制作｜ツール概要（最新）</p>
       <h1>資格の勉強を、自分専用の「問題集＋先生役のAI」で進めるツール</h1>
       <p class="sub">
-        画面はすべて「こう使う想定」のイメージです。レイアウトは今後変わることがあります。
+        画面は実際のアプリから撮ったイメージです。細部のレイアウトは今後変わることがあります。
       </p>
 
       <div class="hero">
         <p>
           <strong>ひとことで言うと</strong><br />
-          学びたい資格を登録し、例題づくり・質問・単語の理解確認・模擬試験までを、ひとつの道具の中で続けられる勉強ツールです。
+          学びたい資格を登録し、例題づくり・質問・単語の理解確認・間隔反復の復習・弱点分析・模擬試験までを、ひとつの道具の中で続けられる勉強ツールです。
         </p>
       </div>
 
-      <section>
+      <nav class="toc" aria-label="目次">
+        <strong>この資料の見方</strong>
+        <ol>
+          <li><a href="#why">なぜ作っているか／強み</a></li>
+          <li><a href="#flow">使い方の全体像（基本機能）</a></li>
+          <li><a href="#main">リニューアル後のメイン画面</a></li>
+          <li><a href="#added">フィードバックを受けて追加した機能</a></li>
+          <li><a href="#exam">本番試験まわりの現状</a></li>
+          <li><a href="#todo">残りの対応</a></li>
+        </ol>
+      </nav>
+
+      <!-- ========== なぜ / 強み ========== -->
+      <section id="why">
         <h2>なぜ作ろうとしているか</h2>
         <div class="callout info">
           <strong class="title">背景</strong>
@@ -362,6 +510,8 @@
               <li>問題を解く</li>
               <li>その問題について質問する</li>
               <li>出てきた単語の理解度を確認する</li>
+              <li>忘却曲線に沿って復習する</li>
+              <li>弱点を可視化して次の一手を決める</li>
             </ul>
             <p class="muted" style="margin-top: 12px; margin-bottom: 0">
               別々のアプリやノートを行き来せず、同じ場所で一貫して続けられます。
@@ -385,10 +535,11 @@
 
       <hr />
 
-      <section>
+      <!-- ========== 全体像 ========== -->
+      <section id="flow">
         <h2>使い方の全体像</h2>
         <p class="muted">
-          まず資格を登録してメイン画面を開き、そこで例題・質問・単語チェック・模擬試験を行います。やったことは履歴で見返せます。
+          まず資格を登録してメイン画面を開き、例題・質問・単語チェック・復習・分析・模擬試験を行います。やったことは履歴で見返せます。
         </p>
         <div class="flow-overview">
           <div class="flow-step">
@@ -400,7 +551,7 @@
           <div class="flow-step">
             <div class="n">②</div>
             <h3>例題を作る</h3>
-            <p>編集・削除もできる</p>
+            <p>カテゴリ付きで編集・削除も</p>
           </div>
           <div class="arrow">→</div>
           <div class="flow-step">
@@ -417,6 +568,12 @@
           <div class="arrow">→</div>
           <div class="flow-step">
             <div class="n">⑤</div>
+            <h3>復習・分析</h3>
+            <p>定着と現在地の確認</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-step">
+            <div class="n">⑥</div>
             <h3>模擬試験</h3>
             <p>本番に近い形で受ける</p>
           </div>
@@ -424,7 +581,7 @@
       </section>
 
       <section>
-        <h2>使い方（画面イメージつき）</h2>
+        <h2>使い方（基本機能・画面イメージつき）</h2>
 
         <article class="step-block">
           <div class="step-head">
@@ -439,7 +596,7 @@
           </div>
           <div class="shot">
             <img
-              src="cert-select.png"
+              src="cert-select-screen.png"
               alt="資格選択画面のイメージ。資格を追加し、学習中一覧から選んで始める"
             />
             <div class="shot-caption">画面イメージ①｜資格の登録・選択</div>
@@ -453,7 +610,7 @@
               <h3>例題を作る（編集・削除もできる）</h3>
               <p class="muted" style="margin: 0">
                 AIに任せて作ることも、キーワード・画像・参考リンクなどの条件を付けて作ることもできます。
-                例題が10問以上たまると、ランダムに10〜25問を連続で解くこともできます。
+                例題がたまると、まとめて解くこともできます（苦手・未解答を優先）。
               </p>
             </div>
           </div>
@@ -495,77 +652,280 @@
               </p>
             </div>
           </div>
-          <div class="shot">
-            <img
-              src="keyword-review-result.png"
-              alt="キーワードレビュー結果。理解度A〜Dと理由・良い点・改善点"
-            />
-            <div class="shot-caption">画面イメージ④｜キーワード理解度の結果（入力はメイン画面の右側）</div>
-          </div>
-        </article>
-
-        <article class="step-block">
-          <div class="step-head">
-            <div class="step-num">5</div>
-            <div>
-              <h3>本番さながらの試験を受けられる</h3>
-              <p class="muted" style="margin: 0">
-                メイン画面から、本番に近い形の試験に取り組めます。
-              </p>
-            </div>
-          </div>
-          <div class="callout warn" style="margin-bottom: 0">
-            <strong class="title">①のあと、メイン画面で②〜⑤がそろう</strong>
-            登録した資格を選ぶとメイン画面が開き、例題・単語チェック・模擬試験などをまとめて使えます。
+          <div class="callout" style="margin-bottom: 0">
+            <strong class="title">④はメイン画面の右側で行います</strong>
+            「キーワードの自己説明」がこのステップです。一度説明できた内容は、あとから「今日の復習」で間隔を空けて再テストされます。
           </div>
         </article>
       </section>
 
-      <section>
-        <h2>メイン画面でできること</h2>
+      <hr />
+
+      <!-- ========== メイン画面 ========== -->
+      <section id="main">
+        <h2>リニューアル後のメイン画面</h2>
         <p class="muted">
-          資格を選んだあとの「司令室」です。左に履歴、中央に例題、右に単語チェック、右上に模擬試験、という配置のイメージです。
+          資格を選んだあとの「司令室」です。ヘッダーに復習・分析・設定・本番試験への入口が集まり、本体は3カラム構成です。
         </p>
+
+        <h3>ヘッダーの入口</h3>
+        <div class="header-map">
+          <div class="header-chip">
+            <span class="badge new">追加</span>
+            <h4>今日の復習</h4>
+            <p>期限が来たカードを再テスト。件数バッジ付き。</p>
+          </div>
+          <div class="header-chip">
+            <span class="badge new">追加</span>
+            <h4>分析</h4>
+            <p>カテゴリ理解度・キーワード進捗のダッシュボード。</p>
+          </div>
+          <div class="header-chip">
+            <span class="badge new">追加</span>
+            <h4>設定</h4>
+            <p>メール・パスワード変更、ログアウト。</p>
+          </div>
+          <div class="header-chip hot">
+            <span class="badge hot">右上</span>
+            <h4>本番試験を実施</h4>
+            <p>本番に近い形の試験へ（詳細は後述）。</p>
+          </div>
+        </div>
+
+        <h3 style="margin-top: 20px">3カラムの役割</h3>
         <div class="main-map">
           <div class="zone">
             <span class="badge">左</span>
             <h4>実施履歴</h4>
-            <p>過去の取り組みを新しい順に確認。詳細も開けます。</p>
+            <p>まとめて解く・AI質問・キーワードレビューなどを新しい順に確認。</p>
           </div>
           <div class="zone">
             <span class="badge accent">中央</span>
             <h4>例題一覧</h4>
-            <p>作成・編集・削除、単独で解く、まとめて解く。</p>
+            <p>作成・編集・削除、単独で解く、まとめて解く。カテゴリタグ・誤り連絡付き。</p>
           </div>
           <div class="zone">
             <span class="badge accent">右</span>
-            <h4>単語の自己説明</h4>
-            <p>理解度チェック（④）。実務を見据えた確認。</p>
+            <h4>キーワードの自己説明</h4>
+            <p>理解度チェック。定着の入口にもなる。</p>
           </div>
         </div>
-        <p class="muted" style="margin-top: 10px">
-          <span class="badge hot">右上</span>
-          「本番試験を実施」から⑤の模擬試験へ。
-        </p>
+
         <div class="shot">
           <img
-            src="cert-main.png"
-            alt="メイン画面のイメージ。履歴・例題一覧・キーワード自己説明"
+            src="new-main-screen.png"
+            alt="リニューアル後のメイン画面。履歴・例題一覧・キーワード自己説明とヘッダー操作"
           />
-          <div class="shot-caption">画面イメージ｜メイン画面（②〜⑤の入り口）</div>
+          <div class="shot-caption">
+            画面イメージ｜メイン画面（復習・分析・設定・本番試験の入口＋3カラム）
+          </div>
+        </div>
+      </section>
+
+      <hr />
+
+      <!-- ========== 追加機能 ========== -->
+      <section id="added">
+        <h2>フィードバックを受けて追加した機能</h2>
+        <div class="callout info">
+          <strong class="title">経緯</strong>
+          基本機能（例題・AI質問・自力説明・模擬試験）を実装したあと、AIからのレビューを受けて「定着」「現在地の可視化」「生成物の品質担保」が足りないと判断し、以下を追加しました。
+        </div>
+
+        <!-- 間隔反復 -->
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num new">A</div>
+            <div>
+              <span class="badge new">追加機能</span>
+              <h3>間隔反復（エビングハウスの忘却曲線）に基づく復習</h3>
+              <p class="muted" style="margin: 0">
+                Ankiのような分散学習です。一度説明できたキーワードや、解いた例題も、人間はすぐ忘れる前提で「3日後」「1週間後」などに自動で再テストします。
+              </p>
+            </div>
+          </div>
+          <div class="why-box">
+            <strong>なぜ追加したか</strong>
+            せっかく「自力説明」や「逆引き問題」をやっても、復習の仕組みがないと実用的な定着に結びつきにくい、という指摘への対応です。
+          </div>
+          <div class="shot">
+            <img
+              src="review-screen.png"
+              alt="今日の復習モーダル。期限が来た例題を再テストする画面"
+            />
+            <div class="shot-caption">
+              画面イメージ｜「今日の復習」モーダル（ヘッダーの件数バッジから開く）
+            </div>
+          </div>
+        </article>
+
+        <!-- 分析ダッシュボード -->
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num new">B</div>
+            <div>
+              <span class="badge new">追加機能</span>
+              <h3>弱点・理解度の可視化ダッシュボード</h3>
+              <p class="muted" style="margin: 0">
+                履歴の一覧だけでなく、「ストレージ系は80%だがネットワーク系は30%」「説明できたキーワード数：15/50個」といった現在地を、レーダーチャートと進捗率で一目で見られます。全体／月次／週次の切り替えにも対応しています。
+              </p>
+            </div>
+          </div>
+          <div class="why-box">
+            <strong>なぜ追加したか</strong>
+            「何をしたか」は履歴で見えるが、「今どこが弱いか」が一目でわからないと、次に何を勉強すべきか決めづらく、モチベーションも続きにくい、という指摘への対応です。
+          </div>
+          <div class="shot">
+            <img
+              src="comprehension-screen.png"
+              alt="分析モーダル。カテゴリ理解度のタグとレーダーチャート、キーワード進捗"
+            />
+            <div class="shot-caption">
+              画面イメージ｜「分析」モーダル（カテゴリ理解度＋キーワード進捗）
+            </div>
+          </div>
+        </article>
+
+        <!-- 誤り連絡 -->
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num new">C</div>
+            <div>
+              <span class="badge new">追加機能</span>
+              <h3>AI生成コンテンツのユーザーフィードバック機構</h3>
+              <p class="muted" style="margin: 0">
+                例題カードの「誤りを連絡」から、問題文・選択肢・解説・その他を選んで報告できます。サブエージェントレビューを入れても、生成問題の不備（正解が2つある等）をゼロにはできない前提の安全弁です。
+              </p>
+            </div>
+          </div>
+          <div class="why-box">
+            <strong>なぜ追加したか</strong>
+            生成物の品質をレビューだけで保証しきれないため、ユーザーが「おかしい」と報告し、修正・再学習につなげる仕組みが必要、という指摘への対応です。
+          </div>
+          <div class="shot">
+            <img
+              src="mistake-report-screen.png"
+              alt="内容の誤りを連絡するモーダル。対象の選択と連絡内容の入力"
+            />
+            <div class="shot-caption">
+              画面イメージ｜「内容の誤りを連絡」モーダル
+            </div>
+          </div>
+        </article>
+
+        <!-- 設定 -->
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num new">D</div>
+            <div>
+              <span class="badge new">追加対応</span>
+              <h3>設定画面（メール・パスワード変更）</h3>
+              <p class="muted" style="margin: 0">
+                アカウントのメールアドレス変更、パスワード変更、ログアウトをまとめた設定画面を追加しました。
+              </p>
+            </div>
+          </div>
+          <div class="shot">
+            <img
+              src="setting-screen.png"
+              alt="設定画面。メールアドレス変更、パスワード変更、ログアウト"
+            />
+            <div class="shot-caption">画面イメージ｜設定</div>
+          </div>
+        </article>
+
+        <!-- カテゴリ -->
+        <article class="step-block">
+          <div class="step-head">
+            <div class="step-num new">E</div>
+            <div>
+              <span class="badge new">追加対応</span>
+              <h3>問題へのカテゴリー追加</h3>
+              <p class="muted" style="margin: 0">
+                例題にカテゴリ（例：ストレージ・データベース、ネットワーク・コンテンツ配信 など）を付与し、一覧での表示・分析ダッシュボードの軸として使います。カテゴリマスタと累積の正解率も一覧で確認できます。
+              </p>
+            </div>
+          </div>
+          <div class="shot">
+            <img
+              src="category-list-screen.png"
+              alt="カテゴリー一覧モーダル。各カテゴリの正解率と件数"
+            />
+            <div class="shot-caption">
+              画面イメージ｜カテゴリー一覧（累積の正解率付き）
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <hr />
+
+      <!-- ========== 本番試験 ========== -->
+      <section id="exam">
+        <h2>本番試験まわりの現状</h2>
+        <div class="callout warn">
+          <strong class="title">実装の進め方（現状）</strong>
+          汎用的に「どの資格でも本番試験を自動生成する」機能は、まだ未実装です。一方で、自分の資格向けの本番試験問題を用意し、受験できるところまでは進めています。受験後の問題は例題に追加できます。
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <span class="badge done">できていること</span>
+            <h3>手元の資格向け本番試験</h3>
+            <ul>
+              <li>メイン画面の「本番試験を実施」から受験できる</li>
+              <li>受験し終わった問題を例題に追加できる</li>
+              <li>自分の資格の問題は作成済み（ただしまだ解いていない分もある）</li>
+            </ul>
+          </div>
+          <div class="card">
+            <span class="badge todo">まだないこと</span>
+            <h3>汎用の本番試験作成</h3>
+            <ul>
+              <li>任意の資格向けに本番試験を一括生成する仕組み</li>
+              <li>受験後の得意／苦手分野分析の見た目確認（残課題）</li>
+              <li>実施履歴への本番試験結果反映の見た目確認（残課題）</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 残り ========== -->
+      <section id="todo">
+        <h2>残りの対応</h2>
+        <div class="callout todo">
+          <strong class="title">これから確認・仕上げること</strong>
+          本番試験を実際に受験したあと、結果画面と履歴の見え方を確認する必要があります。
+        </div>
+        <div class="status-row">
+          <div class="status-item">
+            <span class="badge todo">残</span>
+            <h4>得意分野・苦手分野の分析結果</h4>
+            <p>
+              本番試験受験後に表示される分野別の分析結果の見た目・内容を確認する。
+            </p>
+          </div>
+          <div class="status-item">
+            <span class="badge todo">残</span>
+            <h4>実施履歴の見た目</h4>
+            <p>
+              本番試験の結果が実施履歴にどう載るか、詳細画面の見え方を確認する。
+            </p>
+          </div>
         </div>
       </section>
 
       <section>
-        <h2>履歴で見返せるもの</h2>
+        <h2>いま見返せるもの（履歴）</h2>
         <div class="card">
           <ul>
+            <li>例題をまとめて解いた結果</li>
             <li>例題でAIに質問した内容</li>
             <li>単語の理解度チェックで入力した内容と、AIからのフィードバック</li>
-            <li>本番試験（模擬）の結果</li>
+            <li>本番試験（模擬）の結果（見た目の最終確認は残課題）</li>
           </ul>
           <p class="muted" style="margin: 12px 0 0">
-            「いつ・何をして・どうだったか」をあとから振り返れるようにします。
+            「いつ・何をして・どうだったか」をあとから振り返れるようにしています。
           </p>
         </div>
       </section>

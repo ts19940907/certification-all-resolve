@@ -208,7 +208,7 @@ export async function renameCertification(
   const canRename = await canRenameCertification(certificationId);
   if (!canRename) {
     throw new Error(
-      '例題または履歴がある資格は改名できません。中身を空にすると改名できます。',
+      '例題・履歴がある、共有バンクがある、または他のユーザーが利用中の資格は改名できません。',
     );
   }
 
@@ -252,18 +252,44 @@ export async function setCertificationArchived(
 export async function canRenameCertification(
   certificationId: string,
 ): Promise<boolean> {
-  const [{ count: exampleCount, error: exampleError }, { count: historyCount, error: historyError }] =
-    await Promise.all([
-      supabase
-        .from('examples')
-        .select('id', { count: 'exact', head: true })
-        .eq('certification_id', certificationId),
-      supabase
-        .from('histories')
-        .select('id', { count: 'exact', head: true })
-        .eq('certification_id', certificationId),
-    ]);
+  const user = await ensureCurrentUserRow();
 
+  const [
+    { count: otherUserCount, error: otherUserError },
+    { count: bankCount, error: bankError },
+    { count: exampleCount, error: exampleError },
+    { count: historyCount, error: historyError },
+  ] = await Promise.all([
+    supabase
+      .from('user_certifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('certification_id', certificationId)
+      .neq('user_id', user.id),
+    supabase
+      .from('examples')
+      .select('id', { count: 'exact', head: true })
+      .eq('certification_id', certificationId)
+      .is('user_id', null),
+    supabase
+      .from('examples')
+      .select('id', { count: 'exact', head: true })
+      .eq('certification_id', certificationId)
+      .eq('user_id', user.id),
+    supabase
+      .from('histories')
+      .select('id', { count: 'exact', head: true })
+      .eq('certification_id', certificationId)
+      .eq('user_id', user.id),
+  ]);
+
+  if (otherUserError) {
+    console.error('[certifications] other users', otherUserError);
+    throw otherUserError;
+  }
+  if (bankError) {
+    console.error('[certifications] bank count', bankError);
+    throw bankError;
+  }
   if (exampleError) {
     console.error('[certifications] example count', exampleError);
     throw exampleError;
@@ -273,7 +299,12 @@ export async function canRenameCertification(
     throw historyError;
   }
 
-  return (exampleCount ?? 0) === 0 && (historyCount ?? 0) === 0;
+  return (
+    (otherUserCount ?? 0) === 0 &&
+    (bankCount ?? 0) === 0 &&
+    (exampleCount ?? 0) === 0 &&
+    (historyCount ?? 0) === 0
+  );
 }
 
 export function getErrorMessage(error: unknown, fallback: string) {
