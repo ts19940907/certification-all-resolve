@@ -104,8 +104,10 @@ export function ExampleSolveModal({
   onHistoryChanged,
   onExamFinished,
 }: Props) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const isWide = width >= 720;
+  const isPhone = width < 720;
+  const isShort = height < 720;
   const [queueIndex, setQueueIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -859,7 +861,10 @@ export function ExampleSolveModal({
             <Image
               key={uri}
               source={{ uri }}
-              style={styles.questionImage}
+              style={[
+                styles.questionImage,
+                isPhone && styles.questionImagePhone,
+              ]}
               resizeMode="contain"
               accessibilityLabel="問題の図"
             />
@@ -1141,7 +1146,13 @@ export function ExampleSolveModal({
       animationType="fade"
       onRequestClose={requestClose}
     >
-      <View style={[styles.overlay, examMode && styles.overlayExam]}>
+      <View
+        style={[
+          styles.overlay,
+          examMode && styles.overlayExam,
+          isPhone && styles.overlayPhone,
+        ]}
+      >
         <Pressable
           style={styles.backdrop}
           onPress={() => {
@@ -1153,8 +1164,15 @@ export function ExampleSolveModal({
             styles.card,
             (revealed || chatOpen || showBatchSummary || examMode) &&
               styles.cardTall,
+            isShort && styles.cardTallShort,
             examMode
-              ? [styles.cardExam, { width: width * 0.9, maxWidth: width * 0.9 }]
+              ? [
+                  styles.cardExam,
+                  {
+                    width: isPhone ? width - 16 : width * 0.9,
+                    maxWidth: isPhone ? width - 16 : width * 0.9,
+                  },
+                ]
               : chatOpen
                 ? isWide
                   ? styles.cardExpandedWide
@@ -1311,7 +1329,17 @@ export function ExampleSolveModal({
                 <View
                   style={[
                     styles.chatPane,
-                    showChatSide ? styles.halfPane : styles.chatPaneStacked,
+                    showChatSide
+                      ? styles.halfPane
+                      : [
+                          styles.chatPaneStacked,
+                          {
+                            maxHeight: Math.round(
+                              height * (isShort ? 0.36 : 0.4),
+                            ),
+                            minHeight: isShort ? 160 : 200,
+                          },
+                        ],
                   ]}
                 >
                   {chatPanel}
@@ -1711,6 +1739,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 24,
   },
+  overlayPhone: {
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
   overlayExam: {
     paddingHorizontal: 0,
   },
@@ -1730,6 +1762,10 @@ const styles = StyleSheet.create({
   },
   cardTall: {
     height: '92%',
+  },
+  cardTallShort: {
+    height: '96%',
+    maxHeight: '96%',
   },
   cardWide: {
     maxWidth: 560,
@@ -2015,6 +2051,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
   },
+  questionImagePhone: {
+    height: 160,
+  },
   choiceList: {
     gap: 10,
   },
@@ -2251,11 +2290,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   chatPaneStacked: {
-    height: 300,
-    flexGrow: 0,
-    flexShrink: 0,
-    marginHorizontal: 20,
-    marginBottom: 12,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 220,
+    marginHorizontal: 12,
+    marginBottom: 8,
   },
   chatPaneInner: {
     flex: 1,

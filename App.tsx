@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { NotificationBell } from './src/components/NotificationBell';
 import { fetchCertifications } from './src/lib/certificationsApi';
@@ -42,6 +43,7 @@ function routeFromNext(next: string | undefined): AppRoute {
 }
 
 export default function App() {
+  const { width } = useWindowDimensions();
   const [fontsLoaded] = useFonts({
     NotoSansJP_400Regular,
     NotoSansJP_700Bold,
@@ -415,12 +417,22 @@ export default function App() {
           onDismissExternalNotice={() => setNotificationNotice(null)}
         />
       ) : (
-        <View style={styles.selectWrap}>
-          <View style={styles.topBar}>
+          <View style={styles.selectWrap}>
+          <View
+            style={[
+              styles.topBar,
+              width < 720 && styles.topBarPhone,
+            ]}
+          >
             <Text style={styles.topBarEmail} numberOfLines={1}>
               {session.user.email}
             </Text>
-            <View style={styles.topBarActions}>
+            <View
+              style={[
+                styles.topBarActions,
+                width < 720 && styles.topBarActionsPhone,
+              ]}
+            >
               <NotificationBell onOpenExample={handleOpenFromNotification} />
               <Pressable
                 accessibilityRole="button"
@@ -503,16 +515,26 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     zIndex: 2,
   },
+  topBarPhone: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    flexWrap: 'wrap',
+  },
   topBarEmail: {
     flex: 1,
     fontFamily: 'NotoSansJP_400Regular',
     fontSize: 13,
     color: colors.inkSoft,
+    minWidth: 0,
   },
   topBarActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  topBarActionsPhone: {
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
   },
   settingsButton: {
     borderRadius: 10,

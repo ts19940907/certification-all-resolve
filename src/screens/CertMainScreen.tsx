@@ -96,6 +96,18 @@ const MAX_QUESTION_COUNT = 25;
 const DEFAULT_QUESTION_COUNT = 10;
 const EXAM_QUESTION_COUNT = 75;
 const EXAM_TIME_LIMIT_MINUTES = 180;
+/** 実施履歴・例題一覧の同時表示上限（超過分はリスト内スクロール） */
+const MAX_VISIBLE_LIST_ITEMS = 6;
+const HISTORY_ROW_ESTIMATE = 92;
+const EXAMPLE_ROW_ESTIMATE = 112;
+const LIST_ITEM_GAP = 10;
+
+function listMaxHeightForVisibleRows(
+  rowEstimate: number,
+  visible = MAX_VISIBLE_LIST_ITEMS,
+) {
+  return visible * rowEstimate + Math.max(0, visible - 1) * LIST_ITEM_GAP;
+}
 
 function clampQuestionCount(value: number, available: number) {
   const maxAllowed = Math.min(MAX_QUESTION_COUNT, Math.max(0, available));
@@ -132,6 +144,7 @@ export function CertMainScreen({
   const { width } = useWindowDimensions();
   const isWide = width >= 900;
   const isMid = width >= 720;
+  const isPhone = width < 720;
   const [questionCountText, setQuestionCountText] = useState(
     String(DEFAULT_QUESTION_COUNT),
   );
@@ -837,8 +850,361 @@ export function CertMainScreen({
     setQuestionCountText(String(next));
   };
 
+  const historyListBody = historiesLoading ? (
+    <View style={styles.historyEmptyBox}>
+      <ActivityIndicator color={colors.accent} />
+      <Text style={styles.historyEmptyText}>読み込み中…</Text>
+    </View>
+  ) : historiesError ? (
+    <Text style={styles.historyEmptyText}>{historiesError}</Text>
+  ) : histories.length === 0 ? (
+    <Text style={styles.historyEmptyText}>まだ実施履歴はありません</Text>
+  ) : (
+    histories.map((item) => (
+      <View
+        key={item.id}
+        style={[styles.historyRow, isPhone && styles.historyRowPhone]}
+      >
+        <View style={styles.historyMain}>
+          <Text style={styles.historyTime}>{item.performedAt}</Text>
+          <Text style={styles.historyTitle} numberOfLines={2}>
+            {item.title}
+          </Text>
+          <Text style={styles.historySummary}>{item.summary}</Text>
+        </View>
+        <View
+          style={[styles.historyActions, isPhone && styles.historyActionsPhone]}
+        >
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              void openHistoryDetail(item);
+            }}
+            style={({ pressed }) => [
+              styles.historyDetailButton,
+              pressed && styles.historyDetailButtonPressed,
+            ]}
+          >
+            <Text style={styles.historyDetailButtonLabel}>詳細</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setHistoryDeleteTarget(item)}
+            style={({ pressed }) => [
+              styles.historyDeleteButton,
+              pressed && styles.historyDeleteButtonPressed,
+            ]}
+          >
+            <Text style={styles.historyDeleteButtonLabel}>削除</Text>
+          </Pressable>
+        </View>
+      </View>
+    ))
+  );
+
+  const examplesHeaderBody = (
+    <View
+      style={[
+        styles.examplesHeader,
+        isWide ? styles.examplesHeaderWide : styles.examplesHeaderStacked,
+      ]}
+    >
+      <Text style={styles.examplesTitle}>例題一覧</Text>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setIsCreateOpen(true)}
+        style={({ pressed }) => [
+          styles.createButton,
+          !isWide && styles.createButtonStacked,
+          pressed && styles.createButtonPressed,
+        ]}
+      >
+        <Text style={styles.createButtonLabel}>＋例題を新規作成</Text>
+      </Pressable>
+    </View>
+  );
+
+  const examplesControlsBody = (
+    <>
+      <View style={styles.questionCountRow}>
+        <TextInput
+          value={questionCountText}
+          onChangeText={handleQuestionCountChange}
+          onBlur={handleQuestionCountBlur}
+          keyboardType="number-pad"
+          inputMode="numeric"
+          maxLength={2}
+          editable={maxSelectableCount > 0}
+          style={styles.questionCountInput}
+          accessibilityLabel="問題数"
+        />
+        <Text style={styles.questionCountUnit}>問</Text>
+        <Pressable
+          accessibilityRole="button"
+          disabled={!canStartBatch || batchPickBusy}
+          onPress={() => {
+            void openBatchSolve();
+          }}
+          style={({ pressed }) => [
+            styles.solveButton,
+            pressed &&
+              canStartBatch &&
+              !batchPickBusy &&
+              styles.solveButtonPressed,
+            (!canStartBatch || batchPickBusy) && styles.solveButtonDisabled,
+          ]}
+        >
+          <Text
+            style={[
+              styles.solveButtonLabel,
+              (!canStartBatch || batchPickBusy) &&
+                styles.solveButtonLabelDisabled,
+            ]}
+          >
+            {batchPickBusy ? '準備中…' : '例題を解く'}
+          </Text>
+        </Pressable>
+        <Text
+          style={[
+            styles.questionCountHint,
+            isPhone && styles.questionCountHintPhone,
+          ]}
+        >
+          {availableCount === 0
+            ? '※例題がありません'
+            : availableCount < MIN_QUESTION_COUNT
+              ? `※まとめて解くには${MIN_QUESTION_COUNT}問以上必要（現在${availableCount}問）`
+              : '※苦手・未解答を優先して出題します'}
+        </Text>
+      </View>
+
+      <View style={styles.filterRow}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setFilterMenuOpen((v) => !v)}
+          style={({ pressed }) => [
+            styles.filterCombo,
+            isPhone && styles.filterComboPhone,
+            pressed && styles.filterComboPressed,
+          ]}
+        >
+          <Text style={styles.filterComboLabel} numberOfLines={1}>
+            {filterDraft === 'all'
+              ? 'すべて'
+              : filterDraft === 'uncategorized'
+                ? '未分類'
+                : categories.find((c) => c.id === filterDraft)?.name ??
+                  'カテゴリ'}
+          </Text>
+          <Text style={styles.filterComboCaret}>▼</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            setFilterApplied(filterDraft);
+            setFilterMenuOpen(false);
+          }}
+          style={({ pressed }) => [
+            styles.filterButton,
+            pressed && styles.filterButtonPressed,
+          ]}
+        >
+          <Text style={styles.filterButtonLabel}>フィルター</Text>
+        </Pressable>
+        <Text style={[styles.filterHint, isPhone && styles.filterHintPhone]}>
+          表示中 {filteredExamples.length} / {examples.length}（{filterLabel}）
+        </Text>
+      </View>
+      {filterMenuOpen ? (
+        <View style={styles.filterMenu}>
+          {(
+            [
+              { id: 'all', name: 'すべて' },
+              { id: 'uncategorized', name: '未分類' },
+              ...categories.map((c) => ({ id: c.id, name: c.name })),
+            ] as Array<{ id: string; name: string }>
+          ).map((opt) => (
+            <Pressable
+              key={opt.id}
+              accessibilityRole="button"
+              onPress={() => setFilterDraft(opt.id)}
+              style={[
+                styles.filterOption,
+                filterDraft === opt.id && styles.filterOptionActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.filterOptionLabel,
+                  filterDraft === opt.id && styles.filterOptionLabelActive,
+                ]}
+              >
+                {opt.name}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </>
+  );
+
+  const examplesListBody = examplesLoading ? (
+    <Text style={styles.panelLead}>例題を読み込み中…</Text>
+  ) : examplesError ? (
+    <Text style={styles.panelLead}>{examplesError}</Text>
+  ) : examples.length === 0 ? (
+    <Text style={styles.panelLead}>
+      まだ例題がありません。「＋例題を新規作成」から追加できます。
+    </Text>
+  ) : filteredExamples.length === 0 ? (
+    <Text style={styles.panelLead}>
+      条件に一致する例題がありません。フィルターを変更してください。
+    </Text>
+  ) : (
+    filteredExamples.map((example) => (
+      <View
+        key={example.id}
+        style={[styles.exampleRow, isPhone && styles.exampleRowPhone]}
+      >
+        <View style={styles.exampleTitleBlock}>
+          <Text style={styles.exampleTitle} numberOfLines={2}>
+            {example.title}
+          </Text>
+          {example.categoryName ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setCategoryMasterOpen(true)}
+              style={({ pressed }) => [
+                styles.categoryTag,
+                pressed && styles.categoryTagPressed,
+              ]}
+            >
+              <Text style={styles.categoryTagLabel}>{example.categoryName}</Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.uncategorizedLabel}>未分類</Text>
+          )}
+        </View>
+        <View
+          style={[styles.exampleActions, isPhone && styles.exampleActionsPhone]}
+        >
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => openSolve(example.id)}
+            style={({ pressed }) => [
+              styles.rowAction,
+              pressed && styles.rowActionPressed,
+            ]}
+          >
+            <Text style={styles.rowActionLabel}>単独で解く</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setReportTarget(example)}
+            style={({ pressed }) => [
+              styles.rowAction,
+              styles.rowActionSecondary,
+              pressed && styles.rowActionPressed,
+            ]}
+          >
+            <Text style={styles.rowActionLabelSecondary}>誤りを連絡</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.rowAction,
+              styles.rowActionSecondary,
+              pressed && styles.rowActionPressed,
+            ]}
+          >
+            <Text style={styles.rowActionLabelSecondary}>編集</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            disabled={deleteBusy}
+            onPress={() => setDeleteTarget(example)}
+            style={({ pressed }) => [
+              styles.rowAction,
+              styles.rowActionDanger,
+              pressed && styles.rowActionPressed,
+            ]}
+          >
+            <Text style={styles.rowActionLabelDanger}>削除</Text>
+          </Pressable>
+        </View>
+      </View>
+    ))
+  );
+
+  const keywordFormBody = (
+    <>
+      <Text style={styles.sectionLabel}>キーワードの自己説明</Text>
+      <Text style={styles.keywordLead}>
+        キーワードと説明を分けて入力し、自分自身のキーワードの理解度をAIにチェックしてもらうことができます。
+      </Text>
+      <Text style={styles.fieldLabel}>キーワード</Text>
+      <TextInput
+        editable={!reviewBusy}
+        value={keywordText}
+        onChangeText={setKeywordText}
+        placeholder="キーワードを入力"
+        placeholderTextColor={colors.muted}
+        style={styles.keywordNameInput}
+      />
+      <Text style={styles.fieldLabel}>説明</Text>
+      <TextInput
+        multiline
+        editable={!reviewBusy}
+        value={keywordExplain}
+        onChangeText={setKeywordExplain}
+        placeholder="自分の言葉で説明を入力"
+        placeholderTextColor={colors.muted}
+        style={[
+          styles.keywordExplainInput,
+          isPhone && styles.keywordExplainInputPhone,
+        ]}
+        textAlignVertical="top"
+      />
+      <Pressable
+        accessibilityRole="button"
+        disabled={!canReview || reviewBusy}
+        onPress={() => {
+          void handleKeywordReview();
+        }}
+        style={({ pressed }) => [
+          styles.reviewButton,
+          pressed && canReview && !reviewBusy && styles.reviewButtonPressed,
+          (!canReview || reviewBusy) && styles.reviewButtonDisabled,
+        ]}
+      >
+        {reviewBusy ? (
+          <ActivityIndicator color={colors.paper} />
+        ) : (
+          <Text
+            style={[
+              styles.reviewButtonLabel,
+              !canReview && styles.reviewButtonLabelDisabled,
+            ]}
+          >
+            レビューを実施する
+          </Text>
+        )}
+      </Pressable>
+    </>
+  );
+
+  const historyScrollable = histories.length > MAX_VISIBLE_LIST_ITEMS;
+  const examplesScrollable =
+    !examplesLoading &&
+    !examplesError &&
+    filteredExamples.length > MAX_VISIBLE_LIST_ITEMS;
+  const historyListMaxHeight = listMaxHeightForVisibleRows(HISTORY_ROW_ESTIMATE);
+  const examplesListMaxHeight = listMaxHeightForVisibleRows(
+    isPhone ? EXAMPLE_ROW_ESTIMATE + 24 : EXAMPLE_ROW_ESTIMATE,
+  );
+
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, isPhone && styles.rootPhone]}>
       <View style={[styles.header, !isWide && styles.headerStacked]}>
         {isWide ? (
           <>
@@ -925,17 +1291,28 @@ export function CertMainScreen({
               <Text style={styles.backLinkLabel}>← 選択画面に戻る</Text>
             </Pressable>
             <View style={styles.headerTitle}>
-              <Text style={styles.brand}>CertResolve</Text>
-              <Text style={styles.certName} numberOfLines={2}>
+              <Text style={[styles.brand, isPhone && styles.brandPhone]}>
+                CertResolve
+              </Text>
+              <Text
+                style={[styles.certName, isPhone && styles.certNamePhone]}
+                numberOfLines={2}
+              >
                 {certification.name}
               </Text>
             </View>
-            <View style={styles.headerSideRightStacked}>
+            <View
+              style={[
+                styles.headerSideRightStacked,
+                isPhone && styles.headerSideRightPhone,
+              ]}
+            >
               <Pressable
                 accessibilityRole="button"
                 onPress={() => setReviewOpen(true)}
                 style={({ pressed }) => [
                   styles.srsReviewButton,
+                  isPhone && styles.headerChipPhone,
                   pressed && styles.srsReviewButtonPressed,
                 ]}
               >
@@ -953,6 +1330,7 @@ export function CertMainScreen({
                 onPress={() => setAnalysisOpen(true)}
                 style={({ pressed }) => [
                   styles.analysisButton,
+                  isPhone && styles.headerChipPhone,
                   pressed && styles.analysisButtonPressed,
                 ]}
               >
@@ -964,6 +1342,7 @@ export function CertMainScreen({
                   onPress={onOpenSettings}
                   style={({ pressed }) => [
                     styles.settingsButton,
+                    isPhone && styles.headerChipPhone,
                     pressed && styles.settingsButtonPressed,
                   ]}
                 >
@@ -980,6 +1359,7 @@ export function CertMainScreen({
                 }}
                 style={({ pressed }) => [
                   styles.examButton,
+                  isPhone && styles.headerChipPhone,
                   pressed && styles.examButtonPressed,
                 ]}
               >
@@ -990,352 +1370,94 @@ export function CertMainScreen({
         )}
       </View>
 
-      <View style={[styles.body, !isWide && styles.bodyStacked]}>
-        <View
-          style={[
-            styles.mainColumn,
-            isWide && styles.mainColumnWide,
-            !isMid && styles.mainColumnStacked,
-          ]}
+      {isWide ? (
+        <View style={[styles.body, styles.bodyWideFill]}>
+          <View style={[styles.mainColumn, styles.mainColumnWide]}>
+            <View style={[styles.historyPanel, styles.historyPanelBeside]}>
+              <Text style={styles.panelTitle}>実施履歴</Text>
+              <Text style={styles.panelLead}>最新順に表示されます</Text>
+              <ScrollView
+                style={[
+                  styles.panelScroll,
+                  historyScrollable && {
+                    maxHeight: historyListMaxHeight,
+                    flexGrow: 0,
+                  },
+                ]}
+                contentContainerStyle={styles.panelScrollContent}
+                showsVerticalScrollIndicator
+              >
+                {historyListBody}
+              </ScrollView>
+            </View>
+
+            <View style={[styles.examplesPanel, styles.examplesPanelBeside]}>
+              {examplesHeaderBody}
+              {examplesControlsBody}
+              <ScrollView
+                style={[
+                  styles.panelScroll,
+                  examplesScrollable && {
+                    maxHeight: examplesListMaxHeight,
+                    flexGrow: 0,
+                  },
+                ]}
+                contentContainerStyle={styles.panelScrollContent}
+                showsVerticalScrollIndicator
+              >
+                {examplesListBody}
+              </ScrollView>
+            </View>
+          </View>
+
+          <View style={[styles.keywordPanel, styles.keywordPanelWide]}>
+            {keywordFormBody}
+          </View>
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.phoneScroll}
+          contentContainerStyle={styles.phoneScrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
         >
-          <View style={[styles.historyPanel, isMid && styles.historyPanelBeside]}>
+          <View style={styles.phoneCard}>
             <Text style={styles.panelTitle}>実施履歴</Text>
             <Text style={styles.panelLead}>最新順に表示されます</Text>
             <ScrollView
-              style={styles.panelScroll}
-              contentContainerStyle={styles.panelScrollContent}
-              showsVerticalScrollIndicator
+              style={[
+                styles.panelListScroll,
+                historyScrollable && { maxHeight: historyListMaxHeight },
+              ]}
+              contentContainerStyle={styles.panelList}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={historyScrollable}
+              keyboardShouldPersistTaps="handled"
             >
-              {historiesLoading ? (
-                <View style={styles.historyEmptyBox}>
-                  <ActivityIndicator color={colors.accent} />
-                  <Text style={styles.historyEmptyText}>読み込み中…</Text>
-                </View>
-              ) : historiesError ? (
-                <Text style={styles.historyEmptyText}>{historiesError}</Text>
-              ) : histories.length === 0 ? (
-                <Text style={styles.historyEmptyText}>
-                  まだ実施履歴はありません
-                </Text>
-              ) : (
-                histories.map((item) => (
-                  <View key={item.id} style={styles.historyRow}>
-                    <View style={styles.historyMain}>
-                      <Text style={styles.historyTime}>{item.performedAt}</Text>
-                      <Text style={styles.historyTitle} numberOfLines={2}>
-                        {item.title}
-                      </Text>
-                      <Text style={styles.historySummary}>{item.summary}</Text>
-                    </View>
-                    <View style={styles.historyActions}>
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() => {
-                          void openHistoryDetail(item);
-                        }}
-                        style={({ pressed }) => [
-                          styles.historyDetailButton,
-                          pressed && styles.historyDetailButtonPressed,
-                        ]}
-                      >
-                        <Text style={styles.historyDetailButtonLabel}>詳細</Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() => setHistoryDeleteTarget(item)}
-                        style={({ pressed }) => [
-                          styles.historyDeleteButton,
-                          pressed && styles.historyDeleteButtonPressed,
-                        ]}
-                      >
-                        <Text style={styles.historyDeleteButtonLabel}>削除</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                ))
-              )}
+              {historyListBody}
             </ScrollView>
           </View>
 
-          <View style={[styles.examplesPanel, isMid && styles.examplesPanelBeside]}>
-            <View style={styles.examplesHeader}>
-              <Text style={styles.examplesTitle}>例題一覧</Text>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setIsCreateOpen(true)}
-                style={({ pressed }) => [
-                  styles.createButton,
-                  pressed && styles.createButtonPressed,
-                ]}
-              >
-                <Text style={styles.createButtonLabel}>＋例題を新規作成</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.questionCountRow}>
-              <TextInput
-                value={questionCountText}
-                onChangeText={handleQuestionCountChange}
-                onBlur={handleQuestionCountBlur}
-                keyboardType="number-pad"
-                inputMode="numeric"
-                maxLength={2}
-                editable={maxSelectableCount > 0}
-                style={styles.questionCountInput}
-                accessibilityLabel="問題数"
-              />
-              <Text style={styles.questionCountUnit}>問</Text>
-              <Pressable
-                accessibilityRole="button"
-                disabled={!canStartBatch || batchPickBusy}
-                onPress={() => {
-                  void openBatchSolve();
-                }}
-                style={({ pressed }) => [
-                  styles.solveButton,
-                  pressed &&
-                    canStartBatch &&
-                    !batchPickBusy &&
-                    styles.solveButtonPressed,
-                  (!canStartBatch || batchPickBusy) && styles.solveButtonDisabled,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.solveButtonLabel,
-                    (!canStartBatch || batchPickBusy) &&
-                      styles.solveButtonLabelDisabled,
-                  ]}
-                >
-                  {batchPickBusy ? '準備中…' : '例題を解く'}
-                </Text>
-              </Pressable>
-              <Text style={styles.questionCountHint}>
-                {availableCount === 0
-                  ? '※例題がありません'
-                  : availableCount < MIN_QUESTION_COUNT
-                    ? `※まとめて解くには${MIN_QUESTION_COUNT}問以上必要（現在${availableCount}問）`
-                    : '※苦手・未解答を優先して出題します'}
-              </Text>
-            </View>
-
-            <View style={styles.filterRow}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setFilterMenuOpen((v) => !v)}
-                style={({ pressed }) => [
-                  styles.filterCombo,
-                  pressed && styles.filterComboPressed,
-                ]}
-              >
-                <Text style={styles.filterComboLabel} numberOfLines={1}>
-                  {filterDraft === 'all'
-                    ? 'すべて'
-                    : filterDraft === 'uncategorized'
-                      ? '未分類'
-                      : categories.find((c) => c.id === filterDraft)?.name ??
-                        'カテゴリ'}
-                </Text>
-                <Text style={styles.filterComboCaret}>▼</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => {
-                  setFilterApplied(filterDraft);
-                  setFilterMenuOpen(false);
-                }}
-                style={({ pressed }) => [
-                  styles.filterButton,
-                  pressed && styles.filterButtonPressed,
-                ]}
-              >
-                <Text style={styles.filterButtonLabel}>フィルター</Text>
-              </Pressable>
-              <Text style={styles.filterHint}>
-                表示中 {filteredExamples.length} / {examples.length}（{filterLabel}）
-              </Text>
-            </View>
-            {filterMenuOpen ? (
-              <View style={styles.filterMenu}>
-                {(
-                  [
-                    { id: 'all', name: 'すべて' },
-                    { id: 'uncategorized', name: '未分類' },
-                    ...categories.map((c) => ({ id: c.id, name: c.name })),
-                  ] as Array<{ id: string; name: string }>
-                ).map((opt) => (
-                  <Pressable
-                    key={opt.id}
-                    accessibilityRole="button"
-                    onPress={() => setFilterDraft(opt.id)}
-                    style={[
-                      styles.filterOption,
-                      filterDraft === opt.id && styles.filterOptionActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.filterOptionLabel,
-                        filterDraft === opt.id && styles.filterOptionLabelActive,
-                      ]}
-                    >
-                      {opt.name}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
-
+          <View style={styles.phoneCard}>
+            {examplesHeaderBody}
+            {examplesControlsBody}
             <ScrollView
-              style={styles.panelScroll}
-              contentContainerStyle={styles.panelScrollContent}
-              showsVerticalScrollIndicator
+              style={[
+                styles.panelListScroll,
+                examplesScrollable && { maxHeight: examplesListMaxHeight },
+              ]}
+              contentContainerStyle={styles.panelList}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={examplesScrollable}
+              keyboardShouldPersistTaps="handled"
             >
-              {examplesLoading ? (
-                <Text style={styles.panelLead}>例題を読み込み中…</Text>
-              ) : examplesError ? (
-                <Text style={styles.panelLead}>{examplesError}</Text>
-              ) : examples.length === 0 ? (
-                <Text style={styles.panelLead}>
-                  まだ例題がありません。「＋例題を新規作成」から追加できます。
-                </Text>
-              ) : filteredExamples.length === 0 ? (
-                <Text style={styles.panelLead}>
-                  条件に一致する例題がありません。フィルターを変更してください。
-                </Text>
-              ) : (
-                filteredExamples.map((example) => (
-                  <View key={example.id} style={styles.exampleRow}>
-                    <View style={styles.exampleTitleBlock}>
-                      <Text style={styles.exampleTitle} numberOfLines={2}>
-                        {example.title}
-                      </Text>
-                      {example.categoryName ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          onPress={() => setCategoryMasterOpen(true)}
-                          style={({ pressed }) => [
-                            styles.categoryTag,
-                            pressed && styles.categoryTagPressed,
-                          ]}
-                        >
-                          <Text style={styles.categoryTagLabel}>
-                            {example.categoryName}
-                          </Text>
-                        </Pressable>
-                      ) : (
-                        <Text style={styles.uncategorizedLabel}>未分類</Text>
-                      )}
-                    </View>
-                    <View style={styles.exampleActions}>
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() => openSolve(example.id)}
-                        style={({ pressed }) => [
-                          styles.rowAction,
-                          pressed && styles.rowActionPressed,
-                        ]}
-                      >
-                        <Text style={styles.rowActionLabel}>単独で解く</Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() => setReportTarget(example)}
-                        style={({ pressed }) => [
-                          styles.rowAction,
-                          styles.rowActionSecondary,
-                          pressed && styles.rowActionPressed,
-                        ]}
-                      >
-                        <Text style={styles.rowActionLabelSecondary}>
-                          誤りを連絡
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        style={({ pressed }) => [
-                          styles.rowAction,
-                          styles.rowActionSecondary,
-                          pressed && styles.rowActionPressed,
-                        ]}
-                      >
-                        <Text style={styles.rowActionLabelSecondary}>編集</Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        disabled={deleteBusy}
-                        onPress={() => setDeleteTarget(example)}
-                        style={({ pressed }) => [
-                          styles.rowAction,
-                          styles.rowActionDanger,
-                          pressed && styles.rowActionPressed,
-                        ]}
-                      >
-                        <Text style={styles.rowActionLabelDanger}>削除</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                ))
-              )}
+              {examplesListBody}
             </ScrollView>
           </View>
-        </View>
 
-        <View style={[styles.keywordPanel, isWide && styles.keywordPanelWide]}>
-          <Text style={styles.sectionLabel}>キーワードの自己説明</Text>
-          <Text style={styles.keywordLead}>
-            キーワードと説明を分けて入力し、自分自身のキーワードの理解度をAIにチェックしてもらうことができます。
-          </Text>
-
-          <Text style={styles.fieldLabel}>キーワード</Text>
-          <TextInput
-            editable={!reviewBusy}
-            value={keywordText}
-            onChangeText={setKeywordText}
-            placeholder="キーワードを入力"
-            placeholderTextColor={colors.muted}
-            style={styles.keywordNameInput}
-          />
-
-          <Text style={styles.fieldLabel}>説明</Text>
-          <TextInput
-            multiline
-            editable={!reviewBusy}
-            value={keywordExplain}
-            onChangeText={setKeywordExplain}
-            placeholder="自分の言葉で説明を入力"
-            placeholderTextColor={colors.muted}
-            style={styles.keywordExplainInput}
-            textAlignVertical="top"
-          />
-
-          <Pressable
-            accessibilityRole="button"
-            disabled={!canReview || reviewBusy}
-            onPress={() => {
-              void handleKeywordReview();
-            }}
-            style={({ pressed }) => [
-              styles.reviewButton,
-              pressed && canReview && !reviewBusy && styles.reviewButtonPressed,
-              (!canReview || reviewBusy) && styles.reviewButtonDisabled,
-            ]}
-          >
-            {reviewBusy ? (
-              <ActivityIndicator color={colors.paper} />
-            ) : (
-              <Text
-                style={[
-                  styles.reviewButtonLabel,
-                  !canReview && styles.reviewButtonLabelDisabled,
-                ]}
-              >
-                レビューを実施する
-              </Text>
-            )}
-          </Pressable>
-        </View>
-      </View>
+          <View style={styles.phoneCard}>{keywordFormBody}</View>
+        </ScrollView>
+      )}
 
       <ExampleCreateModal
         visible={isCreateOpen}
@@ -1987,6 +2109,11 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 16,
   },
+  rootPhone: {
+    paddingHorizontal: 10,
+    paddingTop: 12,
+    paddingBottom: 10,
+  },
   header: {
     position: 'relative',
     backgroundColor: colors.ink,
@@ -2033,6 +2160,14 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: 'wrap',
   },
+  headerSideRightPhone: {
+    justifyContent: 'flex-start',
+  },
+  headerChipPhone: {
+    minHeight: 38,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
   headerTitle: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -2046,6 +2181,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     textAlign: 'center',
   },
+  brandPhone: {
+    fontSize: 18,
+  },
   certName: {
     fontFamily: 'NotoSansJP_400Regular',
     fontSize: 15,
@@ -2053,6 +2191,10 @@ const styles = StyleSheet.create({
     color: colors.accentSoft,
     marginTop: 4,
     textAlign: 'center',
+  },
+  certNamePhone: {
+    fontSize: 13,
+    lineHeight: 18,
   },
   backLink: {
     paddingVertical: 6,
@@ -2176,6 +2318,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
+  filterComboPhone: {
+    flexGrow: 1,
+    minWidth: 0,
+    maxWidth: '100%',
+  },
   filterComboPressed: {
     backgroundColor: colors.accentSoft,
   },
@@ -2210,6 +2357,9 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansJP_400Regular',
     fontSize: 12,
     color: colors.muted,
+  },
+  filterHintPhone: {
+    width: '100%',
   },
   filterMenu: {
     borderRadius: 12,
@@ -2280,8 +2430,33 @@ const styles = StyleSheet.create({
     gap: 12,
     minHeight: 0,
   },
+  bodyWideFill: {
+    flex: 1,
+  },
   bodyStacked: {
     flexDirection: 'column',
+    flex: 0,
+    width: '100%',
+  },
+  bodyScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  bodyScrollWide: {
+    flex: 1,
+  },
+  bodyScrollContent: {
+    flexGrow: 1,
+    gap: 12,
+    paddingBottom: 8,
+  },
+  bodyScrollContentWide: {
+    flex: 1,
+  },
+  bodyScrollContentPhone: {
+    flexGrow: 0,
+    paddingBottom: 28,
+    gap: 12,
   },
   mainColumn: {
     flex: 1,
@@ -2294,6 +2469,11 @@ const styles = StyleSheet.create({
   },
   mainColumnStacked: {
     flexDirection: 'column',
+  },
+  mainColumnInScroll: {
+    flex: 0,
+    width: '100%',
+    gap: 12,
   },
   historyPanel: {
     flex: 1,
@@ -2320,6 +2500,20 @@ const styles = StyleSheet.create({
   examplesPanelBeside: {
     flex: 2,
   },
+  panelInScroll: {
+    flex: 0,
+    alignSelf: 'stretch',
+    width: '100%',
+  },
+  historyPanelStacked: {
+    minHeight: 180,
+  },
+  examplesPanelStacked: {
+    minHeight: 240,
+  },
+  panelInScrollPhone: {
+    padding: 12,
+  },
   panelTitle: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 16,
@@ -2334,12 +2528,49 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 12,
   },
+  panelList: {
+    gap: 10,
+    paddingBottom: 4,
+  },
+  panelListScroll: {
+    flexGrow: 0,
+  },
+  phoneScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  phoneScrollContent: {
+    gap: 12,
+    paddingBottom: 28,
+  },
+  phoneCard: {
+    backgroundColor: colors.paper,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    padding: 12,
+    gap: 4,
+  },
+
+  panelScroll: {
+    flex: 1,
+  },
+  panelScrollContent: {
+    gap: 10,
+    paddingBottom: 8,
+  },
   examplesHeader: {
-    position: 'relative',
-    minHeight: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: 12,
+    gap: 10,
+  },
+  examplesHeaderWide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  examplesHeaderStacked: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
   },
   examplesTitle: {
     fontFamily: 'NotoSansJP_700Bold',
@@ -2348,16 +2579,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   createButton: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
     minHeight: 40,
     borderRadius: 12,
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 14,
+  },
+  createButtonStacked: {
+    alignSelf: 'stretch',
+    minHeight: 44,
   },
   createButtonPressed: {
     backgroundColor: colors.accentDeep,
@@ -2422,18 +2653,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.muted,
   },
+  questionCountHintPhone: {
+    width: '100%',
+    textAlign: 'center',
+  },
   sectionLabel: {
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 15,
     color: colors.ink,
     marginBottom: 8,
-  },
-  panelScroll: {
-    flex: 1,
-  },
-  panelScrollContent: {
-    gap: 10,
-    paddingBottom: 8,
   },
   historyEmptyBox: {
     paddingVertical: 24,
@@ -2456,6 +2684,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     backgroundColor: colors.mist,
+  },
+  historyRowPhone: {
+    alignItems: 'flex-start',
+    flexWrap: 'wrap',
   },
   historyMain: {
     flex: 1,
@@ -2499,6 +2731,10 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     gap: 8,
   },
+  historyActionsPhone: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   historyDeleteButton: {
     borderRadius: 10,
     borderWidth: 1,
@@ -2528,6 +2764,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
+  exampleRowPhone: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
   exampleTitle: {
     flex: 1,
     fontFamily: 'NotoSansJP_700Bold',
@@ -2540,6 +2780,10 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: 8,
     flexShrink: 0,
+  },
+  exampleActionsPhone: {
+    justifyContent: 'flex-start',
+    width: '100%',
   },
   rowAction: {
     borderRadius: 10,
@@ -2584,6 +2828,14 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     padding: 14,
   },
+  keywordPanelPhone: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 'auto',
+    width: '100%',
+    minHeight: 0,
+    padding: 12,
+  },
   keywordPanelWide: {
     flex: 1,
     maxWidth: 340,
@@ -2626,6 +2878,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.ink,
     marginBottom: 12,
+  },
+  keywordExplainInputPhone: {
+    minHeight: 96,
   },
   reviewButton: {
     minHeight: 46,

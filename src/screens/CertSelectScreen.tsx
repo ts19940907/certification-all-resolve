@@ -511,7 +511,13 @@ export function CertSelectScreen({ onSelect }: Props) {
         )}
       </ScrollView>
 
-      <View style={[styles.footer, isWide && styles.footerWide]}>
+      <View
+        style={[
+          styles.footer,
+          isWide && styles.footerWide,
+          !isWide && styles.footerPhone,
+        ]}
+      >
         <Pressable
           accessibilityRole="button"
           disabled={!canStart}
@@ -1027,6 +1033,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(240, 244, 248, 0.92)',
     borderTopWidth: 1,
     borderTopColor: colors.line,
+  },
+  footerPhone: {
+    paddingHorizontal: 12,
+    paddingBottom: 20,
   },
   footerWide: {
     paddingHorizontal: 40,
