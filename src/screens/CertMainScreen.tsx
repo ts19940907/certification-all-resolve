@@ -365,6 +365,48 @@ export function CertMainScreen({
     });
   };
 
+  const closeBatchHistoryDetail = () => {
+    setBatchHistoryDetail(null);
+    setBatchHistoryKind(null);
+    setBatchHistoryId(null);
+    setSessionCategoryStats([]);
+  };
+
+  const startBatchRechallenge = async () => {
+    if (!batchHistoryDetail || batchHistoryKind === 'exam') return;
+    const ids = batchHistoryDetail.results.map((item) => item.example_id);
+    try {
+      const existing: string[] = [];
+      for (const id of ids) {
+        if (await exampleExists(id)) {
+          existing.push(id);
+        }
+      }
+      if (existing.length === 0) {
+        setNoticeMessage(
+          'この回の例題は削除されているため、再チャレンジできません。',
+        );
+        return;
+      }
+      if (existing.length < ids.length) {
+        setNoticeMessage(
+          `一部の例題が削除されていたため、残りの ${existing.length} 問で再チャレンジします。`,
+        );
+      }
+      closeBatchHistoryDetail();
+      setSolveSession({
+        exampleIds: existing,
+        historyId: null,
+        initialMessages: [],
+        resumeMode: false,
+      });
+    } catch (error) {
+      setNoticeMessage(
+        getHistoryErrorMessage(error, '再チャレンジの準備に失敗しました。'),
+      );
+    }
+  };
+
   const openExampleFromBatchHistory = async (exampleId: string) => {
     try {
       const exists = await exampleExists(exampleId);
@@ -1915,20 +1957,12 @@ export function CertMainScreen({
         visible={batchHistoryDetail != null}
         transparent
         animationType="fade"
-        onRequestClose={() => {
-          setBatchHistoryDetail(null);
-          setBatchHistoryKind(null);
-          setBatchHistoryId(null);
-        }}
+        onRequestClose={closeBatchHistoryDetail}
       >
         <View style={styles.modalOverlay}>
           <Pressable
             style={styles.modalBackdrop}
-            onPress={() => {
-              setBatchHistoryDetail(null);
-              setBatchHistoryKind(null);
-              setBatchHistoryId(null);
-            }}
+            onPress={closeBatchHistoryDetail}
           />
           <View
             style={[
@@ -1937,11 +1971,24 @@ export function CertMainScreen({
               isWide && styles.modalCardWide,
             ]}
           >
-            <Text style={styles.modalTitle}>
-              {batchHistoryKind === 'exam'
-                ? '本番試験の結果'
-                : 'まとめて解いた結果'}
-            </Text>
+            <View style={styles.batchHistoryHeader}>
+              <Text style={[styles.modalTitle, styles.batchHistoryTitle]}>
+                {batchHistoryKind === 'exam'
+                  ? '本番試験の結果'
+                  : 'まとめて解いた結果'}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="閉じる"
+                onPress={closeBatchHistoryDetail}
+                style={({ pressed }) => [
+                  styles.batchHistoryCloseButton,
+                  pressed && styles.batchHistoryCloseButtonPressed,
+                ]}
+              >
+                <Text style={styles.batchHistoryCloseLabel}>×</Text>
+              </Pressable>
+            </View>
             {batchHistoryDetail ? (
               <ScrollView
                 style={styles.reviewResultScroll}
@@ -2038,23 +2085,24 @@ export function CertMainScreen({
                 })}
               </ScrollView>
             ) : null}
-            <View style={styles.modalActions}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => {
-                  setBatchHistoryDetail(null);
-                  setBatchHistoryKind(null);
-                  setBatchHistoryId(null);
-                  setSessionCategoryStats([]);
-                }}
-                style={({ pressed }) => [
-                  styles.modalPrimaryButton,
-                  pressed && styles.modalPrimaryButtonPressed,
-                ]}
-              >
-                <Text style={styles.modalPrimaryButtonLabel}>閉じる</Text>
-              </Pressable>
-            </View>
+            {batchHistoryKind === 'exam' ? null : (
+              <View style={styles.modalActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    void startBatchRechallenge();
+                  }}
+                  style={({ pressed }) => [
+                    styles.modalPrimaryButton,
+                    pressed && styles.modalPrimaryButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.modalPrimaryButtonLabel}>
+                    再チャレンジをする
+                  </Text>
+                </Pressable>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -3362,6 +3410,33 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansJP_700Bold',
     fontSize: 18,
     color: colors.ink,
+  },
+  batchHistoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  batchHistoryTitle: {
+    flex: 1,
+    paddingRight: 4,
+  },
+  batchHistoryCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.spotlight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  batchHistoryCloseButtonPressed: {
+    backgroundColor: colors.spotlightDeep,
+  },
+  batchHistoryCloseLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 22,
+    lineHeight: 24,
+    color: colors.paper,
   },
   modalLead: {
     fontFamily: 'NotoSansJP_400Regular',
