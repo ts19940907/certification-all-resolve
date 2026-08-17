@@ -14,6 +14,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'CertResolve',
+    icon: path.join(__dirname, '../assets/favicon.png'),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

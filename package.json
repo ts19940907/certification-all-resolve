@@ -46,6 +46,7 @@
     "files": [
       "electron/**/*",
       "dist/**/*",
+      "assets/favicon.png",
       "package.json"
     ],
     "extraMetadata": {
