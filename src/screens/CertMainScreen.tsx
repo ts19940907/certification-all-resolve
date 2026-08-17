@@ -10,6 +10,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { ExampleCreateModal } from '../components/ExampleCreateModal';
 import { ExampleReportModal } from '../components/ExampleReportModal';
 import { ExampleSolveModal } from '../components/ExampleSolveModal';
@@ -102,6 +103,18 @@ const HISTORY_ROW_ESTIMATE = 92;
 const EXAMPLE_ROW_ESTIMATE = 112;
 const LIST_ITEM_GAP = 10;
 
+type PhoneMainTab = 'history' | 'examples' | 'keyword';
+
+const PHONE_TABS: Array<{
+  id: PhoneMainTab;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}> = [
+  { id: 'history', label: '実施履歴', icon: 'time-outline' },
+  { id: 'examples', label: '例題', icon: 'create-outline' },
+  { id: 'keyword', label: 'キーワード', icon: 'mic-outline' },
+];
+
 function listMaxHeightForVisibleRows(
   rowEstimate: number,
   visible = MAX_VISIBLE_LIST_ITEMS,
@@ -177,6 +190,7 @@ export function CertMainScreen({
   const [reviewBusy, setReviewBusy] = useState(false);
   const [keywordReviewResult, setKeywordReviewResult] =
     useState<KeywordReviewResult | null>(null);
+  const [phoneTab, setPhoneTab] = useState<PhoneMainTab>('examples');
   const [batchHistoryDetail, setBatchHistoryDetail] =
     useState<ExampleBatchDetail | null>(null);
   const [batchHistoryKind, setBatchHistoryKind] = useState<string | null>(null);
@@ -1415,48 +1429,87 @@ export function CertMainScreen({
           </View>
         </View>
       ) : (
-        <ScrollView
-          style={styles.phoneScroll}
-          contentContainerStyle={styles.phoneScrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator
-        >
-          <View style={styles.phoneCard}>
-            <Text style={styles.panelTitle}>実施履歴</Text>
-            <Text style={styles.panelLead}>最新順に表示されます</Text>
-            <ScrollView
-              style={[
-                styles.panelListScroll,
-                historyScrollable && { maxHeight: historyListMaxHeight },
-              ]}
-              contentContainerStyle={styles.panelList}
-              nestedScrollEnabled
-              showsVerticalScrollIndicator={historyScrollable}
-              keyboardShouldPersistTaps="handled"
-            >
-              {historyListBody}
-            </ScrollView>
+        <View style={styles.phoneShell}>
+          <View style={styles.phoneTabPane}>
+            {phoneTab === 'history' ? (
+              <View style={styles.phoneCardFill}>
+                <Text style={styles.panelTitle}>実施履歴</Text>
+                <Text style={styles.panelLead}>最新順に表示されます</Text>
+                <ScrollView
+                  style={styles.phoneTabScroll}
+                  contentContainerStyle={styles.panelList}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator
+                >
+                  {historyListBody}
+                </ScrollView>
+              </View>
+            ) : null}
+
+            {phoneTab === 'examples' ? (
+              <View style={styles.phoneCardFill}>
+                {examplesHeaderBody}
+                {examplesControlsBody}
+                <ScrollView
+                  style={styles.phoneTabScroll}
+                  contentContainerStyle={styles.panelList}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator
+                >
+                  {examplesListBody}
+                </ScrollView>
+              </View>
+            ) : null}
+
+            {phoneTab === 'keyword' ? (
+              <ScrollView
+                style={styles.phoneTabScroll}
+                contentContainerStyle={styles.phoneKeywordScrollContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator
+              >
+                <View style={styles.phoneCard}>{keywordFormBody}</View>
+              </ScrollView>
+            ) : null}
           </View>
 
-          <View style={styles.phoneCard}>
-            {examplesHeaderBody}
-            {examplesControlsBody}
-            <ScrollView
-              style={[
-                styles.panelListScroll,
-                examplesScrollable && { maxHeight: examplesListMaxHeight },
-              ]}
-              contentContainerStyle={styles.panelList}
-              nestedScrollEnabled
-              showsVerticalScrollIndicator={examplesScrollable}
-              keyboardShouldPersistTaps="handled"
-            >
-              {examplesListBody}
-            </ScrollView>
+          <View style={styles.phoneTabBar}>
+            {PHONE_TABS.map((tab, index) => {
+              const active = phoneTab === tab.id;
+              const isFirst = index === 0;
+              return (
+                <Pressable
+                  key={tab.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  onPress={() => setPhoneTab(tab.id)}
+                  style={({ pressed }) => [
+                    styles.phoneTabItem,
+                    !isFirst && styles.phoneTabItemDivider,
+                    active && styles.phoneTabItemActive,
+                    pressed && styles.phoneTabItemPressed,
+                  ]}
+                >
+                  <Ionicons
+                    name={tab.icon}
+                    size={18}
+                    color={active ? colors.accentDeep : colors.inkSoft}
+                    style={styles.phoneTabIcon}
+                  />
+                  <Text
+                    style={[
+                      styles.phoneTabLabel,
+                      active && styles.phoneTabLabelActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {tab.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
-
-          <View style={styles.phoneCard}>{keywordFormBody}</View>
-        </ScrollView>
+        </View>
       )}
 
       <ExampleCreateModal
@@ -2535,13 +2588,21 @@ const styles = StyleSheet.create({
   panelListScroll: {
     flexGrow: 0,
   },
-  phoneScroll: {
+  phoneShell: {
     flex: 1,
     minHeight: 0,
   },
-  phoneScrollContent: {
-    gap: 12,
-    paddingBottom: 28,
+  phoneTabPane: {
+    flex: 1,
+    minHeight: 0,
+  },
+  phoneTabScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  phoneKeywordScrollContent: {
+    flexGrow: 1,
+    paddingBottom: 12,
   },
   phoneCard: {
     backgroundColor: colors.paper,
@@ -2550,6 +2611,58 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     padding: 12,
     gap: 4,
+  },
+  phoneCardFill: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: colors.paper,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    padding: 12,
+  },
+  phoneTabBar: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: colors.paper,
+  },
+  phoneTabItem: {
+    flex: 1,
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    backgroundColor: colors.paper,
+  },
+  phoneTabItemDivider: {
+    borderLeftWidth: 1,
+    borderLeftColor: colors.line,
+  },
+  phoneTabItemActive: {
+    backgroundColor: colors.accentSoft,
+  },
+  phoneTabItemPressed: {
+    opacity: 0.88,
+  },
+  phoneTabIcon: {
+    marginTop: 1,
+  },
+  phoneTabLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 12,
+    color: colors.inkSoft,
+    textAlign: 'center',
+  },
+  phoneTabLabelActive: {
+    color: colors.accentDeep,
   },
 
   panelScroll: {
