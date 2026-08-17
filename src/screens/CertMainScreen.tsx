@@ -186,6 +186,7 @@ export function CertMainScreen({
   const [reportTarget, setReportTarget] = useState<ExampleSummary | null>(null);
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [examplesListDialogOpen, setExamplesListDialogOpen] = useState(false);
   const [notificationOpenSignal, setNotificationOpenSignal] = useState<
     number | null
   >(null);
@@ -972,60 +973,62 @@ export function CertMainScreen({
     </View>
   );
 
-  const examplesControlsBody = (
-    <>
-      <View style={styles.questionCountRow}>
-        <TextInput
-          value={questionCountText}
-          onChangeText={handleQuestionCountChange}
-          onBlur={handleQuestionCountBlur}
-          keyboardType="number-pad"
-          inputMode="numeric"
-          maxLength={2}
-          editable={maxSelectableCount > 0}
-          style={styles.questionCountInput}
-          accessibilityLabel="問題数"
-        />
-        <Text style={styles.questionCountUnit}>問</Text>
-        <Pressable
-          accessibilityRole="button"
-          disabled={!canStartBatch || batchPickBusy}
-          onPress={() => {
-            void openBatchSolve();
-          }}
-          style={({ pressed }) => [
-            styles.solveButton,
-            pressed &&
-              canStartBatch &&
-              !batchPickBusy &&
-              styles.solveButtonPressed,
-            (!canStartBatch || batchPickBusy) && styles.solveButtonDisabled,
-          ]}
-        >
-          <Text
-            style={[
-              styles.solveButtonLabel,
-              (!canStartBatch || batchPickBusy) &&
-                styles.solveButtonLabelDisabled,
-            ]}
-          >
-            {batchPickBusy ? '準備中…' : '例題を解く'}
-          </Text>
-        </Pressable>
+  const examplesBatchControlsBody = (
+    <View style={styles.questionCountRow}>
+      <TextInput
+        value={questionCountText}
+        onChangeText={handleQuestionCountChange}
+        onBlur={handleQuestionCountBlur}
+        keyboardType="number-pad"
+        inputMode="numeric"
+        maxLength={2}
+        editable={maxSelectableCount > 0}
+        style={styles.questionCountInput}
+        accessibilityLabel="問題数"
+      />
+      <Text style={styles.questionCountUnit}>問</Text>
+      <Pressable
+        accessibilityRole="button"
+        disabled={!canStartBatch || batchPickBusy}
+        onPress={() => {
+          void openBatchSolve();
+        }}
+        style={({ pressed }) => [
+          styles.solveButton,
+          pressed &&
+            canStartBatch &&
+            !batchPickBusy &&
+            styles.solveButtonPressed,
+          (!canStartBatch || batchPickBusy) && styles.solveButtonDisabled,
+        ]}
+      >
         <Text
           style={[
-            styles.questionCountHint,
-            isPhone && styles.questionCountHintPhone,
+            styles.solveButtonLabel,
+            (!canStartBatch || batchPickBusy) &&
+              styles.solveButtonLabelDisabled,
           ]}
         >
-          {availableCount === 0
-            ? '※例題がありません'
-            : availableCount < MIN_QUESTION_COUNT
-              ? `※まとめて解くには${MIN_QUESTION_COUNT}問以上必要（現在${availableCount}問）`
-              : '※苦手・未解答を優先して出題します'}
+          {batchPickBusy ? '準備中…' : isPhone ? '連続で解く' : '例題を解く'}
         </Text>
-      </View>
+      </Pressable>
+      <Text
+        style={[
+          styles.questionCountHint,
+          isPhone && styles.questionCountHintPhone,
+        ]}
+      >
+        {availableCount === 0
+          ? '※例題がありません'
+          : availableCount < MIN_QUESTION_COUNT
+            ? `※まとめて解くには${MIN_QUESTION_COUNT}問以上必要（現在${availableCount}問）`
+            : '※苦手・未解答を優先して出題します'}
+      </Text>
+    </View>
+  );
 
+  const examplesFilterBody = (
+    <>
       <View style={styles.filterRow}>
         <Pressable
           accessibilityRole="button"
@@ -1093,6 +1096,13 @@ export function CertMainScreen({
           ))}
         </View>
       ) : null}
+    </>
+  );
+
+  const examplesControlsBody = (
+    <>
+      {examplesBatchControlsBody}
+      {examplesFilterBody}
     </>
   );
 
@@ -1241,6 +1251,13 @@ export function CertMainScreen({
     </>
   );
 
+  const examplesListNestedOpen =
+    isCreateOpen ||
+    deleteTarget != null ||
+    solveSession != null ||
+    reportTarget != null ||
+    categoryMasterOpen;
+
   return (
     <View style={[styles.root, isPhone && styles.rootPhone]}>
       <View
@@ -1385,6 +1402,19 @@ export function CertMainScreen({
                 {certification.name}
               </Text>
             </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                void handleExamPress();
+              }}
+              style={({ pressed }) => [
+                styles.headerExamButton,
+                pressed && styles.headerExamButtonPressed,
+              ]}
+            >
+              <Ionicons name="create-outline" size={18} color={colors.paper} />
+              <Text style={styles.headerExamButtonLabel}>本番試験を受ける</Text>
+            </Pressable>
             {onOpenFromNotification ? (
               <NotificationBell
                 hideTrigger
@@ -1410,24 +1440,6 @@ export function CertMainScreen({
             onPress={() => setHeaderMenuOpen(false)}
           />
           <View style={styles.headerMenuCard}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {
-                setHeaderMenuOpen(false);
-                void handleExamPress();
-              }}
-              style={({ pressed }) => [
-                styles.headerMenuItem,
-                pressed && styles.headerMenuItemPressed,
-              ]}
-            >
-              <Ionicons
-                name="create-outline"
-                size={20}
-                color={colors.accentDeep}
-              />
-              <Text style={styles.headerMenuItemLabel}>本番試験を実施</Text>
-            </Pressable>
             {onOpenFromNotification ? (
               <Pressable
                 accessibilityRole="button"
@@ -1562,17 +1574,31 @@ export function CertMainScreen({
             ) : null}
 
             {phoneTab === 'examples' ? (
-              <View style={styles.phoneCardFill}>
-                {examplesHeaderBody}
-                {examplesControlsBody}
-                <ScrollView
-                  style={styles.phoneTabScroll}
-                  contentContainerStyle={styles.panelList}
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator
+              <View style={[styles.phoneCardFill, styles.phoneExamplesPane]}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setIsCreateOpen(true)}
+                  style={({ pressed }) => [
+                    styles.createButton,
+                    styles.createButtonStacked,
+                    pressed && styles.createButtonPressed,
+                  ]}
                 >
-                  {examplesListBody}
-                </ScrollView>
+                  <Text style={styles.createButtonLabel}>＋例題を新規作成</Text>
+                </Pressable>
+                {examplesBatchControlsBody}
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setExamplesListDialogOpen(true)}
+                  style={({ pressed }) => [
+                    styles.openExamplesListButton,
+                    pressed && styles.openExamplesListButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.openExamplesListButtonLabel}>
+                    例題一覧を開く
+                  </Text>
+                </Pressable>
               </View>
             ) : null}
 
@@ -1607,7 +1633,7 @@ export function CertMainScreen({
                 >
                   <Ionicons
                     name={tab.icon}
-                    size={12}
+                    size={18}
                     color={active ? colors.accentDeep : colors.inkSoft}
                     style={styles.phoneTabIcon}
                   />
@@ -1637,6 +1663,64 @@ export function CertMainScreen({
           void loadExamples();
         }}
       />
+
+      <Modal
+        visible={examplesListDialogOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (examplesListNestedOpen) return;
+          setFilterMenuOpen(false);
+          setExamplesListDialogOpen(false);
+        }}
+      >
+        <View style={styles.examplesListDialogOverlay}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="例題一覧を閉じる"
+            style={styles.examplesListDialogBackdrop}
+            onPress={() => {
+              if (examplesListNestedOpen) return;
+              setFilterMenuOpen(false);
+              setExamplesListDialogOpen(false);
+            }}
+          />
+          <View
+            style={[
+              styles.examplesListDialogCard,
+              isWide && styles.examplesListDialogCardWide,
+            ]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={styles.examplesListDialogHeader}>
+              <Text style={styles.examplesListDialogTitle}>例題一覧</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="閉じる"
+                onPress={() => {
+                  setFilterMenuOpen(false);
+                  setExamplesListDialogOpen(false);
+                }}
+                style={({ pressed }) => [
+                  styles.examplesListDialogClose,
+                  pressed && styles.examplesListDialogClosePressed,
+                ]}
+              >
+                <Text style={styles.examplesListDialogCloseLabel}>×</Text>
+              </Pressable>
+            </View>
+            {examplesFilterBody}
+            <ScrollView
+              style={styles.examplesListDialogScroll}
+              contentContainerStyle={styles.panelList}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
+            >
+              {examplesListBody}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={examRebalanceConfirmOpen}
@@ -2350,6 +2434,27 @@ const styles = StyleSheet.create({
   headerTitlePhone: {
     paddingVertical: 2,
   },
+  headerExamButton: {
+    marginTop: 8,
+    minHeight: 42,
+    borderRadius: 12,
+    backgroundColor: colors.spotlight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  headerExamButtonPressed: {
+    backgroundColor: colors.spotlightDeep,
+  },
+  headerExamButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.paper,
+  },
   headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2836,6 +2941,10 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     padding: 12,
   },
+  phoneExamplesPane: {
+    gap: 12,
+    justifyContent: 'flex-start',
+  },
   phoneTabBar: {
     flexDirection: 'row',
     alignItems: 'stretch',
@@ -2851,13 +2960,13 @@ const styles = StyleSheet.create({
   },
   phoneTabItem: {
     flex: 1,
-    minHeight: 35,
+    minHeight: 53,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 6,
     paddingHorizontal: 8,
-    paddingVertical: 8,
+    paddingVertical: 12,
     backgroundColor: colors.paper,
   },
   phoneTabItemDivider: {
@@ -2875,12 +2984,90 @@ const styles = StyleSheet.create({
   },
   phoneTabLabel: {
     fontFamily: 'NotoSansJP_700Bold',
-    fontSize: 11,
+    fontSize: 16,
     color: colors.inkSoft,
     textAlign: 'center',
   },
   phoneTabLabelActive: {
     color: colors.accentDeep,
+  },
+  openExamplesListButton: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  openExamplesListButtonPressed: {
+    backgroundColor: colors.accent,
+  },
+  openExamplesListButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.accentDeep,
+  },
+  examplesListDialogOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 24,
+  },
+  examplesListDialogBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(16, 42, 67, 0.45)',
+  },
+  examplesListDialogCard: {
+    zIndex: 2,
+    flex: 1,
+    maxHeight: '92%',
+    backgroundColor: colors.paper,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: 14,
+    gap: 10,
+  },
+  examplesListDialogCardWide: {
+    maxWidth: 720,
+    alignSelf: 'center',
+    width: '100%',
+  },
+  examplesListDialogHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  examplesListDialogTitle: {
+    flex: 1,
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 18,
+    color: colors.ink,
+  },
+  examplesListDialogClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.spotlight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  examplesListDialogClosePressed: {
+    backgroundColor: colors.spotlightDeep,
+  },
+  examplesListDialogCloseLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 22,
+    lineHeight: 24,
+    color: colors.paper,
+  },
+  examplesListDialogScroll: {
+    flex: 1,
+    minHeight: 0,
   },
 
   panelScroll: {

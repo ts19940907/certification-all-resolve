@@ -1058,8 +1058,10 @@ export function ExampleSolveModal({
       <ScrollView
         style={styles.chatMessages}
         contentContainerStyle={styles.chatMessagesContent}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
+        persistentScrollbar
         keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
       >
         {chatMessages.length === 0 ? (
           <Text style={styles.chatEmpty}>
@@ -2332,12 +2334,14 @@ const styles = StyleSheet.create({
   },
   chatMessages: {
     flex: 1,
-    minHeight: 140,
+    minHeight: 0,
+    ...(Platform.OS === 'web' ? ({ overflow: 'auto' } as object) : null),
   },
   chatMessagesContent: {
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 10,
+    flexGrow: 1,
   },
   chatEmpty: {
     fontFamily: 'NotoSansJP_400Regular',
