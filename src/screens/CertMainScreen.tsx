@@ -1251,6 +1251,7 @@ export function CertMainScreen({
                   pressed && styles.srsReviewButtonPressed,
                 ]}
               >
+                <Ionicons name="sync-outline" size={18} color={colors.ink} />
                 <Text style={styles.srsReviewButtonLabel}>今日の復習</Text>
                 {dueCount > 0 ? (
                   <View style={styles.dueBadge}>
@@ -1268,6 +1269,11 @@ export function CertMainScreen({
                   pressed && styles.analysisButtonPressed,
                 ]}
               >
+                <Ionicons
+                  name="school-outline"
+                  size={18}
+                  color={colors.accentDeep}
+                />
                 <Text style={styles.analysisButtonLabel}>分析</Text>
               </Pressable>
               {onOpenSettings ? (
@@ -1279,11 +1285,19 @@ export function CertMainScreen({
                     pressed && styles.settingsButtonPressed,
                   ]}
                 >
+                  <Ionicons
+                    name="settings-outline"
+                    size={18}
+                    color={colors.accentDeep}
+                  />
                   <Text style={styles.settingsButtonLabel}>設定</Text>
                 </Pressable>
               ) : null}
               {onOpenFromNotification ? (
-                <NotificationBell onOpenExample={onOpenFromNotification} />
+                <NotificationBell
+                  showLabel
+                  onOpenExample={onOpenFromNotification}
+                />
               ) : null}
               <Pressable
                 accessibilityRole="button"
@@ -1295,6 +1309,7 @@ export function CertMainScreen({
                   pressed && styles.examButtonPressed,
                 ]}
               >
+                <Ionicons name="create-outline" size={18} color={colors.paper} />
                 <Text style={styles.examButtonLabel}>本番試験を実施</Text>
               </Pressable>
             </View>
@@ -2438,6 +2453,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 14,
     paddingVertical: 10,
+    flexDirection: 'row',
+    gap: 8,
   },
   examButtonPressed: {
     backgroundColor: colors.spotlightDeep,
@@ -2457,6 +2474,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 14,
     paddingVertical: 10,
+    flexDirection: 'row',
+    gap: 8,
   },
   analysisButtonPressed: {
     backgroundColor: colors.accent,
@@ -2476,6 +2495,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 14,
     paddingVertical: 10,
+    flexDirection: 'row',
+    gap: 8,
   },
   settingsButtonPressed: {
     backgroundColor: colors.accentSoft,

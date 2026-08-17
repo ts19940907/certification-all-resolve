@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import {
   fetchUnreadNotificationCount,
   fetchUserNotifications,
@@ -23,6 +24,8 @@ type Props = {
   hideTrigger?: boolean;
   /** 値が変わったタイミングで通知パネルを開く */
   openSignal?: number | null;
+  /** true のとき「通知」ラベルをアイコン横に表示 */
+  showLabel?: boolean;
 };
 
 function BellIcon({ color, size = 18 }: { color: string; size?: number }) {
@@ -92,6 +95,7 @@ export function NotificationBell({
   onOpenExample,
   hideTrigger = false,
   openSignal = null,
+  showLabel = false,
 }: Props) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -185,12 +189,24 @@ export function NotificationBell({
           onPress={() => setPanelOpen(true)}
           style={({ pressed }) => [
             styles.bellButton,
+            showLabel && styles.bellButtonLabeled,
             pressed && styles.bellButtonPressed,
           ]}
         >
-          <BellIcon color={colors.accentDeep} size={18} />
+          {showLabel ? (
+            <Ionicons
+              name="notifications-outline"
+              size={18}
+              color={colors.accentDeep}
+            />
+          ) : (
+            <BellIcon color={colors.accentDeep} size={18} />
+          )}
+          {showLabel ? (
+            <Text style={styles.bellButtonLabel}>通知</Text>
+          ) : null}
           {badgeLabel ? (
-            <View style={styles.badge}>
+            <View style={[styles.badge, showLabel && styles.badgeInline]}>
               <Text style={styles.badgeLabel}>{badgeLabel}</Text>
             </View>
           ) : null}
@@ -305,9 +321,22 @@ const styles = StyleSheet.create({
     minHeight: 36,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  bellButtonLabeled: {
+    minHeight: 42,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   bellButtonPressed: {
     backgroundColor: colors.accentSoft,
+  },
+  bellButtonLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 14,
+    color: colors.accentDeep,
   },
   badge: {
     position: 'absolute',
@@ -320,6 +349,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.spotlightDeep,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  badgeInline: {
+    position: 'relative',
+    top: 0,
+    right: 0,
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
   },
   badgeLabel: {
     fontFamily: 'NotoSansJP_700Bold',
