@@ -197,6 +197,10 @@ export function CertMainScreen({
   const [batchHistoryId, setBatchHistoryId] = useState<string | null>(null);
   const [reportTarget, setReportTarget] = useState<ExampleSummary | null>(null);
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [notificationOpenSignal, setNotificationOpenSignal] = useState<
+    number | null
+  >(null);
   const [categoryMasterOpen, setCategoryMasterOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [dueCount, setDueCount] = useState(0);
@@ -1297,13 +1301,36 @@ export function CertMainScreen({
           </>
         ) : (
           <>
-            <Pressable
-              accessibilityRole="button"
-              onPress={onBack}
-              style={({ pressed }) => [styles.backLink, pressed && styles.backLinkPressed]}
-            >
-              <Text style={styles.backLinkLabel}>← 選択画面に戻る</Text>
-            </Pressable>
+            <View style={styles.headerTopRow}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={onBack}
+                style={({ pressed }) => [
+                  styles.backLink,
+                  pressed && styles.backLinkPressed,
+                ]}
+              >
+                <Text style={styles.backLinkLabel}>← 選択画面に戻る</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="メニューを開く"
+                onPress={() => setHeaderMenuOpen(true)}
+                style={({ pressed }) => [
+                  styles.hamburgerButton,
+                  pressed && styles.hamburgerButtonPressed,
+                ]}
+              >
+                <Ionicons name="menu" size={22} color={colors.paper} />
+                {dueCount > 0 ? (
+                  <View style={styles.hamburgerBadge}>
+                    <Text style={styles.hamburgerBadgeLabel}>
+                      {dueCount > 99 ? '99+' : String(dueCount)}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            </View>
             <View style={styles.headerTitle}>
               <Text style={[styles.brand, isPhone && styles.brandPhone]}>
                 CertResolve
@@ -1315,74 +1342,131 @@ export function CertMainScreen({
                 {certification.name}
               </Text>
             </View>
-            <View
-              style={[
-                styles.headerSideRightStacked,
-                isPhone && styles.headerSideRightPhone,
-              ]}
-            >
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setReviewOpen(true)}
-                style={({ pressed }) => [
-                  styles.srsReviewButton,
-                  isPhone && styles.headerChipPhone,
-                  pressed && styles.srsReviewButtonPressed,
-                ]}
-              >
-                <Text style={styles.srsReviewButtonLabel}>今日の復習</Text>
-                {dueCount > 0 ? (
-                  <View style={styles.dueBadge}>
-                    <Text style={styles.dueBadgeLabel}>
-                      {dueCount > 99 ? '99+' : String(dueCount)}
-                    </Text>
-                  </View>
-                ) : null}
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setAnalysisOpen(true)}
-                style={({ pressed }) => [
-                  styles.analysisButton,
-                  isPhone && styles.headerChipPhone,
-                  pressed && styles.analysisButtonPressed,
-                ]}
-              >
-                <Text style={styles.analysisButtonLabel}>分析</Text>
-              </Pressable>
-              {onOpenSettings ? (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={onOpenSettings}
-                  style={({ pressed }) => [
-                    styles.settingsButton,
-                    isPhone && styles.headerChipPhone,
-                    pressed && styles.settingsButtonPressed,
-                  ]}
-                >
-                  <Text style={styles.settingsButtonLabel}>設定</Text>
-                </Pressable>
-              ) : null}
-              {onOpenFromNotification ? (
-                <NotificationBell onOpenExample={onOpenFromNotification} />
-              ) : null}
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => {
-                  void handleExamPress();
-                }}
-                style={({ pressed }) => [
-                  styles.examButton,
-                  isPhone && styles.headerChipPhone,
-                  pressed && styles.examButtonPressed,
-                ]}
-              >
-                <Text style={styles.examButtonLabel}>本番試験を実施</Text>
-              </Pressable>
-            </View>
+            {onOpenFromNotification ? (
+              <NotificationBell
+                hideTrigger
+                openSignal={notificationOpenSignal}
+                onOpenExample={onOpenFromNotification}
+              />
+            ) : null}
           </>
         )}
       </View>
+
+      <Modal
+        visible={headerMenuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setHeaderMenuOpen(false)}
+      >
+        <View style={styles.headerMenuOverlay}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="メニューを閉じる"
+            style={styles.headerMenuBackdrop}
+            onPress={() => setHeaderMenuOpen(false)}
+          />
+          <View style={styles.headerMenuCard}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setHeaderMenuOpen(false);
+                void handleExamPress();
+              }}
+              style={({ pressed }) => [
+                styles.headerMenuItem,
+                pressed && styles.headerMenuItemPressed,
+              ]}
+            >
+              <Ionicons
+                name="create-outline"
+                size={20}
+                color={colors.accentDeep}
+              />
+              <Text style={styles.headerMenuItemLabel}>本番試験を実施</Text>
+            </Pressable>
+            {onOpenFromNotification ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setHeaderMenuOpen(false);
+                  setNotificationOpenSignal((prev) => (prev ?? 0) + 1);
+                }}
+                style={({ pressed }) => [
+                  styles.headerMenuItem,
+                  pressed && styles.headerMenuItemPressed,
+                ]}
+              >
+                <Ionicons
+                  name="notifications-outline"
+                  size={20}
+                  color={colors.accentDeep}
+                />
+                <Text style={styles.headerMenuItemLabel}>通知</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setHeaderMenuOpen(false);
+                setAnalysisOpen(true);
+              }}
+              style={({ pressed }) => [
+                styles.headerMenuItem,
+                pressed && styles.headerMenuItemPressed,
+              ]}
+            >
+              <Ionicons
+                name="school-outline"
+                size={20}
+                color={colors.accentDeep}
+              />
+              <Text style={styles.headerMenuItemLabel}>分析</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setHeaderMenuOpen(false);
+                setReviewOpen(true);
+              }}
+              style={({ pressed }) => [
+                styles.headerMenuItem,
+                pressed && styles.headerMenuItemPressed,
+              ]}
+            >
+              <Ionicons name="sync-outline" size={20} color={colors.accentDeep} />
+              <Text style={styles.headerMenuItemLabel}>今日の復習</Text>
+              {dueCount > 0 ? (
+                <View style={styles.headerMenuDueBadge}>
+                  <Text style={styles.dueBadgeLabel}>
+                    {dueCount > 99 ? '99+' : String(dueCount)}
+                  </Text>
+                </View>
+              ) : null}
+            </Pressable>
+            {onOpenSettings ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setHeaderMenuOpen(false);
+                  onOpenSettings();
+                }}
+                style={({ pressed }) => [
+                  styles.headerMenuItem,
+                  pressed && styles.headerMenuItemPressed,
+                ]}
+              >
+                <Ionicons
+                  name="settings-outline"
+                  size={20}
+                  color={colors.accentDeep}
+                />
+                <Text style={styles.headerMenuItemLabel}>設定</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
 
       {isWide ? (
         <View style={[styles.body, styles.bodyWideFill]}>
@@ -2226,6 +2310,91 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 8,
     paddingVertical: 4,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  hamburgerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  hamburgerButtonPressed: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  hamburgerBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: colors.spotlight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hamburgerBadgeLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 9,
+    color: colors.paper,
+  },
+  headerMenuOverlay: {
+    flex: 1,
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: 56,
+    paddingHorizontal: 12,
+  },
+  headerMenuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(16, 42, 67, 0.35)',
+  },
+  headerMenuCard: {
+    zIndex: 1,
+    minWidth: 220,
+    maxWidth: 280,
+    backgroundColor: colors.paper,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingVertical: 6,
+    shadowColor: '#102A43',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  headerMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  headerMenuItemPressed: {
+    backgroundColor: colors.accentSoft,
+  },
+  headerMenuItemLabel: {
+    flex: 1,
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 15,
+    color: colors.ink,
+  },
+  headerMenuDueBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    backgroundColor: colors.accentDeep,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   brand: {
     fontFamily: 'NotoSansJP_700Bold',

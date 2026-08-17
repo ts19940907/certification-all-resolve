@@ -19,6 +19,10 @@ import type { UserNotification } from '../types/notification';
 
 type Props = {
   onOpenExample: (notification: UserNotification) => void;
+  /** true のときベルボタンを描画しない（外部から openSignal で開く） */
+  hideTrigger?: boolean;
+  /** 値が変わったタイミングで通知パネルを開く */
+  openSignal?: number | null;
 };
 
 function BellIcon({ color, size = 18 }: { color: string; size?: number }) {
@@ -84,7 +88,11 @@ function BellIcon({ color, size = 18 }: { color: string; size?: number }) {
   );
 }
 
-export function NotificationBell({ onOpenExample }: Props) {
+export function NotificationBell({
+  onOpenExample,
+  hideTrigger = false,
+  openSignal = null,
+}: Props) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -130,6 +138,11 @@ export function NotificationBell({ onOpenExample }: Props) {
     void loadList();
   }, [panelOpen, loadList]);
 
+  useEffect(() => {
+    if (openSignal == null) return;
+    setPanelOpen(true);
+  }, [openSignal]);
+
   const handleOpenItem = async (item: UserNotification) => {
     if (openingId) return;
     setOpeningId(item.id);
@@ -161,26 +174,28 @@ export function NotificationBell({ onOpenExample }: Props) {
 
   return (
     <>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={
-          badgeLabel
-            ? `通知（未読 ${badgeLabel} 件）`
-            : '通知'
-        }
-        onPress={() => setPanelOpen(true)}
-        style={({ pressed }) => [
-          styles.bellButton,
-          pressed && styles.bellButtonPressed,
-        ]}
-      >
-        <BellIcon color={colors.accentDeep} size={18} />
-        {badgeLabel ? (
-          <View style={styles.badge}>
-            <Text style={styles.badgeLabel}>{badgeLabel}</Text>
-          </View>
-        ) : null}
-      </Pressable>
+      {hideTrigger ? null : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            badgeLabel
+              ? `通知（未読 ${badgeLabel} 件）`
+              : '通知'
+          }
+          onPress={() => setPanelOpen(true)}
+          style={({ pressed }) => [
+            styles.bellButton,
+            pressed && styles.bellButtonPressed,
+          ]}
+        >
+          <BellIcon color={colors.accentDeep} size={18} />
+          {badgeLabel ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeLabel}>{badgeLabel}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      )}
 
       <Modal
         visible={panelOpen}
