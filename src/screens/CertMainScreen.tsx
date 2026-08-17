@@ -1223,7 +1223,13 @@ export function CertMainScreen({
 
   return (
     <View style={[styles.root, isPhone && styles.rootPhone]}>
-      <View style={[styles.header, !isWide && styles.headerStacked]}>
+      <View
+        style={[
+          styles.header,
+          !isWide && styles.headerStacked,
+          isPhone && styles.headerPhone,
+        ]}
+      >
         {isWide ? (
           <>
             <View style={styles.headerTitleOverlay} pointerEvents="none">
@@ -1346,7 +1352,9 @@ export function CertMainScreen({
                 ) : null}
               </Pressable>
             </View>
-            <View style={styles.headerTitle}>
+            <View
+              style={[styles.headerTitle, isPhone && styles.headerTitlePhone]}
+            >
               <Text style={[styles.brand, isPhone && styles.brandPhone]}>
                 CertResolve
               </Text>
@@ -1591,7 +1599,7 @@ export function CertMainScreen({
                 >
                   <Ionicons
                     name={tab.icon}
-                    size={18}
+                    size={12}
                     color={active ? colors.accentDeep : colors.inkSoft}
                     style={styles.phoneTabIcon}
                   />
@@ -2257,25 +2265,24 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.mist,
-    paddingHorizontal: 16,
-    paddingTop: 20,
-    paddingBottom: 16,
   },
   rootPhone: {
-    paddingHorizontal: 10,
-    paddingTop: 12,
-    paddingBottom: 10,
+    paddingTop: 6,
+    paddingBottom: 5,
   },
   header: {
     position: 'relative',
     backgroundColor: colors.ink,
-    borderRadius: 14,
+    borderRadius: 0,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    marginBottom: 12,
+    marginBottom: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  headerPhone: {
+    gap: 6,
   },
   headerStacked: {
     flexDirection: 'column',
@@ -2325,6 +2332,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 8,
     paddingVertical: 4,
+  },
+  headerTitlePhone: {
+    paddingVertical: 2,
   },
   headerTopRow: {
     flexDirection: 'row',
@@ -2796,9 +2806,8 @@ const styles = StyleSheet.create({
   },
   phoneCard: {
     backgroundColor: colors.paper,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: colors.line,
+    borderRadius: 0,
+    borderWidth: 0,
     padding: 12,
     gap: 4,
   },
@@ -2806,30 +2815,32 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     backgroundColor: colors.paper,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: colors.line,
+    borderRadius: 0,
+    borderWidth: 0,
     padding: 12,
   },
   phoneTabBar: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    marginTop: 10,
-    borderWidth: 1,
+    marginTop: 0,
+    borderTopWidth: 1,
+    borderBottomWidth: 0,
+    borderLeftWidth: 0,
+    borderRightWidth: 0,
     borderColor: colors.line,
-    borderRadius: 12,
+    borderRadius: 0,
     overflow: 'hidden',
     backgroundColor: colors.paper,
   },
   phoneTabItem: {
     flex: 1,
-    minHeight: 52,
+    minHeight: 35,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 12,
+    paddingVertical: 8,
     backgroundColor: colors.paper,
   },
   phoneTabItemDivider: {
@@ -2847,7 +2858,7 @@ const styles = StyleSheet.create({
   },
   phoneTabLabel: {
     fontFamily: 'NotoSansJP_700Bold',
-    fontSize: 12,
+    fontSize: 11,
     color: colors.inkSoft,
     textAlign: 'center',
   },
