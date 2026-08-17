@@ -97,11 +97,6 @@ const MAX_QUESTION_COUNT = 25;
 const DEFAULT_QUESTION_COUNT = 10;
 const EXAM_QUESTION_COUNT = 75;
 const EXAM_TIME_LIMIT_MINUTES = 180;
-/** 実施履歴・例題一覧の同時表示上限（超過分はリスト内スクロール） */
-const MAX_VISIBLE_LIST_ITEMS = 6;
-const HISTORY_ROW_ESTIMATE = 92;
-const EXAMPLE_ROW_ESTIMATE = 112;
-const LIST_ITEM_GAP = 10;
 
 type PhoneMainTab = 'history' | 'examples' | 'keyword';
 
@@ -114,13 +109,6 @@ const PHONE_TABS: Array<{
   { id: 'examples', label: '例題', icon: 'create-outline' },
   { id: 'keyword', label: 'キーワード', icon: 'mic-outline' },
 ];
-
-function listMaxHeightForVisibleRows(
-  rowEstimate: number,
-  visible = MAX_VISIBLE_LIST_ITEMS,
-) {
-  return visible * rowEstimate + Math.max(0, visible - 1) * LIST_ITEM_GAP;
-}
 
 function clampQuestionCount(value: number, available: number) {
   const maxAllowed = Math.min(MAX_QUESTION_COUNT, Math.max(0, available));
@@ -1211,16 +1199,6 @@ export function CertMainScreen({
     </>
   );
 
-  const historyScrollable = histories.length > MAX_VISIBLE_LIST_ITEMS;
-  const examplesScrollable =
-    !examplesLoading &&
-    !examplesError &&
-    filteredExamples.length > MAX_VISIBLE_LIST_ITEMS;
-  const historyListMaxHeight = listMaxHeightForVisibleRows(HISTORY_ROW_ESTIMATE);
-  const examplesListMaxHeight = listMaxHeightForVisibleRows(
-    isPhone ? EXAMPLE_ROW_ESTIMATE + 24 : EXAMPLE_ROW_ESTIMATE,
-  );
-
   return (
     <View style={[styles.root, isPhone && styles.rootPhone]}>
       <View
@@ -1498,13 +1476,7 @@ export function CertMainScreen({
               <Text style={styles.panelTitle}>実施履歴</Text>
               <Text style={styles.panelLead}>最新順に表示されます</Text>
               <ScrollView
-                style={[
-                  styles.panelScroll,
-                  historyScrollable && {
-                    maxHeight: historyListMaxHeight,
-                    flexGrow: 0,
-                  },
-                ]}
+                style={styles.panelScroll}
                 contentContainerStyle={styles.panelScrollContent}
                 showsVerticalScrollIndicator
               >
@@ -1516,13 +1488,7 @@ export function CertMainScreen({
               {examplesHeaderBody}
               {examplesControlsBody}
               <ScrollView
-                style={[
-                  styles.panelScroll,
-                  examplesScrollable && {
-                    maxHeight: examplesListMaxHeight,
-                    flexGrow: 0,
-                  },
-                ]}
+                style={styles.panelScroll}
                 contentContainerStyle={styles.panelScrollContent}
                 showsVerticalScrollIndicator
               >
@@ -2730,12 +2696,13 @@ const styles = StyleSheet.create({
   },
   historyPanel: {
     flex: 1,
-    minHeight: 200,
+    minHeight: 0,
     backgroundColor: colors.paper,
     borderRadius: 14,
     borderWidth: 1.5,
     borderColor: colors.line,
     padding: 14,
+    overflow: 'hidden',
   },
   historyPanelBeside: {
     flex: 1,
@@ -2743,15 +2710,17 @@ const styles = StyleSheet.create({
   },
   examplesPanel: {
     flex: 1,
-    minHeight: 220,
+    minHeight: 0,
     backgroundColor: colors.paper,
     borderRadius: 14,
     borderWidth: 1.5,
     borderColor: colors.line,
     padding: 14,
+    overflow: 'hidden',
   },
   examplesPanelBeside: {
     flex: 2,
+    minHeight: 0,
   },
   panelInScroll: {
     flex: 0,
@@ -2868,6 +2837,7 @@ const styles = StyleSheet.create({
 
   panelScroll: {
     flex: 1,
+    minHeight: 0,
   },
   panelScrollContent: {
     gap: 10,
@@ -3135,12 +3105,13 @@ const styles = StyleSheet.create({
   },
   keywordPanel: {
     flex: 1,
-    minHeight: 240,
+    minHeight: 0,
     backgroundColor: colors.paper,
     borderRadius: 14,
     borderWidth: 1.5,
     borderColor: colors.line,
     padding: 14,
+    overflow: 'hidden',
   },
   keywordPanelPhone: {
     flexGrow: 0,
@@ -3153,6 +3124,7 @@ const styles = StyleSheet.create({
   keywordPanelWide: {
     flex: 1,
     maxWidth: 340,
+    minHeight: 0,
   },
   keywordLead: {
     fontFamily: 'NotoSansJP_400Regular',
