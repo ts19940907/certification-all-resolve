@@ -22,6 +22,7 @@ type IdentifyDraft = {
   choice_min: number | null;
   choice_max: number | null;
   answer_max: number | null;
+  exam_question_count: number | null;
 };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -83,6 +84,10 @@ function normalizeIdentify(raw: unknown): IdentifyDraft {
     choice_min: toNullableInt(obj.choice_min),
     choice_max: toNullableInt(obj.choice_max),
     answer_max: toNullableInt(obj.answer_max),
+    exam_question_count: (() => {
+      const n = toNullableInt(obj.exam_question_count);
+      return n != null && n > 0 ? n : null;
+    })(),
   };
 }
 
@@ -141,6 +146,7 @@ function buildIdentifyPrompt(query: string): string {
   - official_url は公式の案内ページURL（不明なら空文字。推測で偽ドメインを作らない）
   - question_format はビットフラグ: 1=単一選択, 2=複数選択, 4=記述。該当するものを OR
   - choice_min / choice_max / answer_max は本番に近い目安（不明なら null）
+  - exam_question_count は本番試験の出題数（例: SAP-C02 は 75）。不明なら null
 - ambiguous / not_found のとき、official_name 等は空でよい。question_format は 0
 
 出力はJSONオブジェクトのみ:
@@ -153,7 +159,8 @@ function buildIdentifyPrompt(query: string): string {
   "question_format": 0,
   "choice_min": null,
   "choice_max": null,
-  "answer_max": null
+  "answer_max": null,
+  "exam_question_count": null
 }`;
 }
 
@@ -297,6 +304,8 @@ Deno.serve(async (req) => {
       choice_min: reviewed.choice_min,
       choice_max: reviewed.choice_max,
       answer_max: reviewed.answer_max,
+      exam_question_count:
+        identified.exam_question_count ?? reviewed.exam_question_count,
       status: 'matched',
       candidate_count: 1,
     };
@@ -328,6 +337,7 @@ Deno.serve(async (req) => {
         choice_min: finalCandidate.choice_min,
         choice_max: finalCandidate.choice_max,
         answer_max: finalCandidate.answer_max,
+        exam_question_count: finalCandidate.exam_question_count,
       },
     });
   } catch (error) {

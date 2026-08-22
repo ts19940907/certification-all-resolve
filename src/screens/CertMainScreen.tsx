@@ -476,10 +476,12 @@ export function CertMainScreen({
 
   const openExamLobby = async () => {
     try {
-      const ids = await fetchBankExampleIdsForExam(
-        certification.id,
-        EXAM_QUESTION_COUNT,
-      );
+      const take =
+        certification.examQuestionCount != null &&
+        certification.examQuestionCount > 0
+          ? certification.examQuestionCount
+          : EXAM_QUESTION_COUNT;
+      const ids = await fetchBankExampleIdsForExam(certification.id, take);
       if (ids.length === 0) {
         setNoticeMessage('試験問題がありません。');
         return;
@@ -521,7 +523,9 @@ export function CertMainScreen({
         if (at && at.total > 0 && !at.inTargetRange) {
           const multiPct = Math.round(at.multiRatio * 100);
           setExamBankProgressText(
-            `解答形式の比率が目安外です（単一 ${at.single} / 複数 ${at.multi} = 複数 ${multiPct}%）。SAP 目安は複数 20〜30%（目標 ${at.multiTarget} 問）です。単一選択を一部削除し、複数選択を再生成して調整しますか？`,
+            `解答形式の比率が目安外です（単一 ${at.single} / 複数 ${at.multi} = 複数 ${multiPct}%）。この資格の目安は複数 ${Math.round(
+              at.multiMinRatio * 100,
+            )}〜${Math.round(at.multiMaxRatio * 100)}%（目標 ${at.multiTarget} 問）です。単一選択を一部削除し、複数選択を再生成して調整しますか？`,
           );
           setExamRebalanceConfirmOpen(true);
           return;
@@ -558,7 +562,7 @@ export function CertMainScreen({
       const rebalanced = await rebalanceExamBankForMulti(certification.id);
       setExamBankProgressText(
         rebalanced.deleted > 0
-          ? `単一選択を ${rebalanced.deleted} 問削除しました（現在 ${rebalanced.totalHave}/150）。複数選択を生成中…`
+          ? `単一選択を ${rebalanced.deleted} 問削除しました（現在 ${rebalanced.totalHave}/${rebalanced.targetTotal}）。複数選択を生成中…`
           : '比率は既に近いため削除なし。不足分があれば生成します…',
       );
       const result = await runExamBankFullGeneration(
@@ -608,7 +612,9 @@ export function CertMainScreen({
           `作成済み ${status.totalHave}/${status.targetTotal} 問から再開します…`,
         );
       } else {
-        setExamBankProgressText('作成済み 0/150 問から生成を開始します…');
+        setExamBankProgressText(
+          `作成済み 0/${status.targetTotal || '—'} 問から生成を開始します…`,
+        );
       }
 
       const result = await runExamBankFullGeneration(
@@ -1740,8 +1746,7 @@ export function CertMainScreen({
           <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
             <Text style={styles.modalTitle}>複数選択の比率を調整しますか？</Text>
             <Text style={styles.modalLead}>
-              現行の試験問題は単一選択に偏っている可能性があります。単一選択を一部削除し、複数選択（正解2つ）を再生成して SAP 目安（複数
-              20〜30%）に近づけます。
+              現行の試験問題は単一選択に偏っている可能性があります。単一選択を一部削除し、複数選択（正解2つ）を再生成して目安の比率に近づけます。
             </Text>
             {examBankProgressText ? (
               <Text style={styles.modalLead}>{examBankProgressText}</Text>
@@ -1804,7 +1809,7 @@ export function CertMainScreen({
           <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
             <Text style={styles.modalTitle}>試験問題を作成しますか？</Text>
             <Text style={styles.modalLead}>
-              AWS SAP 向け試験問題（150問）をAIで生成します。ドメイン比率は公式ガイドに沿い、1回あたり最大5問ずつ作成します。途中で止まっても既存の問題は残し、続きから再開できます。完了まで時間がかかります。
+              この資格の試験問題をAIで生成します。出題数の2倍を目標とし、設定されたドメイン比率に沿って1回あたり最大5問ずつ作成します。途中で止まっても既存の問題は残し、続きから再開できます。完了まで時間がかかります。
             </Text>
             {examBankProgressText ? (
               <Text style={styles.modalLead}>{examBankProgressText}</Text>

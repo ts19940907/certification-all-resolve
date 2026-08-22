@@ -10,4 +10,6 @@ export type Certification = {
   choiceMin: number | null;
   choiceMax: number | null;
   answerMax: number | null;
+  /** 本番試験の出題数。試験問題バンク目標は ×2 */
+  examQuestionCount: number | null;
 };

@@ -187,6 +187,7 @@ export async function rebalanceExamBankForMulti(
   deleted: number;
   totalHave: number;
   totalRemaining: number;
+  targetTotal: number;
   answerTypes: ExamBankAnswerTypes | null;
   message: string | null;
 }> {
@@ -195,6 +196,7 @@ export async function rebalanceExamBankForMulti(
     deleted: payload.deleted ?? 0,
     totalHave: payload.totalHave ?? 0,
     totalRemaining: payload.totalRemaining ?? 0,
+    targetTotal: payload.targetTotal ?? TARGET_TOTAL_FALLBACK,
     answerTypes: payload.answerTypes ?? null,
     message: payload.message ?? null,
   };
@@ -227,7 +229,7 @@ export async function generateExamBankBatchStep(
 }
 
 /**
- * 150問までバッチ生成を繰り返す。
+ * 目標件数までバッチ生成を繰り返す。
  * 途中失敗時はそれまでの進捗を返す（再実行で再開可）。
  */
 export async function runExamBankFullGeneration(

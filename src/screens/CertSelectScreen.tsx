@@ -53,6 +53,7 @@ export function CertSelectScreen({ onSelect }: Props) {
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [confirmCandidate, setConfirmCandidate] =
     useState<ValidatedCertificationCandidate | null>(null);
+  const [confirmExamCountText, setConfirmExamCountText] = useState('');
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
 
@@ -163,6 +164,13 @@ export function CertSelectScreen({ onSelect }: Props) {
 
   const handleConfirmSave = async () => {
     if (!confirmCandidate || busy) return;
+    const parsedCount = Number(confirmExamCountText.replace(/\D/g, ''));
+    const examQuestionCount =
+      Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : null;
+    if (examQuestionCount == null) {
+      setNoticeMessage('本番試験の出題数を入力してください。');
+      return;
+    }
     setBusy(true);
     try {
       if (nameModalMode === 'rename') {
@@ -175,6 +183,7 @@ export function CertSelectScreen({ onSelect }: Props) {
           choiceMin: confirmCandidate.choiceMin,
           choiceMax: confirmCandidate.choiceMax,
           answerMax: confirmCandidate.answerMax,
+          examQuestionCount,
         });
         await loadCertifications();
         setConfirmCandidate(null);
@@ -188,6 +197,7 @@ export function CertSelectScreen({ onSelect }: Props) {
         choiceMin: confirmCandidate.choiceMin,
         choiceMax: confirmCandidate.choiceMax,
         answerMax: confirmCandidate.answerMax,
+        examQuestionCount,
       });
       try {
         await ensureCertificationMasters(created.id);
@@ -269,6 +279,11 @@ export function CertSelectScreen({ onSelect }: Props) {
           return;
         }
         setConfirmCandidate(candidate);
+        setConfirmExamCountText(
+          candidate.examQuestionCount != null
+            ? String(candidate.examQuestionCount)
+            : '',
+        );
       } catch (error) {
         console.error('[CertSelectScreen] validate', error);
         setNoticeMessage(
@@ -315,6 +330,13 @@ export function CertSelectScreen({ onSelect }: Props) {
         return;
       }
       setConfirmCandidate(candidate);
+      setConfirmExamCountText(
+        candidate.examQuestionCount != null
+          ? String(candidate.examQuestionCount)
+          : selected.examQuestionCount != null
+            ? String(selected.examQuestionCount)
+            : '',
+      );
     } catch (error) {
       console.error('[CertSelectScreen] validate rename', error);
       const message = getErrorMessage(error, '資格の照合に失敗しました。');
@@ -653,6 +675,23 @@ export function CertSelectScreen({ onSelect }: Props) {
                 公式サイトのリンクは特定できませんでした。
               </Text>
             )}
+            <Text style={styles.fieldLabel}>本番試験の出題数</Text>
+            <TextInput
+              value={confirmExamCountText}
+              onChangeText={(text) =>
+                setConfirmExamCountText(text.replace(/\D/g, '').slice(0, 3))
+              }
+              keyboardType="number-pad"
+              inputMode="numeric"
+              maxLength={3}
+              placeholder="例: 75"
+              placeholderTextColor={colors.muted}
+              style={styles.examCountInput}
+              editable={!busy}
+            />
+            <Text style={styles.confirmHint}>
+              試験問題バンクの目標件数は、この出題数の2倍になります。
+            </Text>
             <View style={styles.modalActions}>
               <Pressable
                 accessibilityRole="button"
@@ -1120,6 +1159,24 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: colors.muted,
     marginBottom: 16,
+  },
+  fieldLabel: {
+    fontFamily: 'NotoSansJP_700Bold',
+    fontSize: 13,
+    color: colors.ink,
+    marginBottom: 6,
+  },
+  examCountInput: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: 'NotoSansJP_400Regular',
+    fontSize: 16,
+    color: colors.ink,
+    backgroundColor: colors.paper,
+    marginBottom: 8,
   },
   linkButton: {
     alignSelf: 'flex-start',

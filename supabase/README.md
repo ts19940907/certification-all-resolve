@@ -239,28 +239,30 @@ node scripts/backfill-cert-analysis.mjs
    ```
 3. 仕様メモ
    - 同じ正式名称の資格はマスタ1行。追加時は既存マスタへ参加
-   - `examples.user_id IS NULL` = 共有バンク問題
+   - `examples.user_id IS NULL` = 共有バンク（画面上は「試験問題」）
    - 例題リスト: 自分の例題 ＋ `user_example_library` で取り込んだ共有問題
    - 共有問題の「削除」= 取り込み解除（再取り込み可）
-   - `domain`: SAP 向け (`organizational_complexity` / `new_solutions` / `continuous_improvement` / `migration_modernization`)
+   - `domain`: 資格ごとのブループリント `domain_key`（SAP 固定 CHECK は撤廃済み）
 
-## 試験バンク（パイロット生成）
+## 試験問題バンク（資格ブループリント）
 
-1. SQL Editor で `migrations/20260814120000_exam_bank_status.sql` を Run  
-   （`certifications.exam_bank_status` / `exam_bank_message`）
+1. SQL Editor で次を Run  
+   - `migrations/20260814120000_exam_bank_status.sql`（`exam_bank_status` / `exam_bank_message`）  
+   - `migrations/20260822130000_exam_blueprints.sql`（`exam_question_count` / `exam_blueprints` / `exam_blueprint_domains` / SAP シード）
 2. Edge Function をデプロイ
    ```bash
    npx supabase functions deploy generate-exam-bank
    npx supabase functions deploy generate-example
+   npx supabase functions deploy validate-certification
    ```
-3. アプリ
-   - メイン「本番試験を実施」→ 共有バンクが無ければ作成確認（時間がかかる旨）
-   - SAP-C02 向け **150問**（ドメイン 39/44/37/30）を **1呼び出しあたり最大5問** 生成＋簡易検品して投入
-   - 途中失敗時も既存問題は残し、再実行で不足分だけ再開（自動削除しない）
-   - 完了後、共有バンクから75問を抽選 → **スタート画面**で開始（制限時間 **180分**、時間切れ時は未解答を不正解集計）
-   - 解答形式の目安: **単一 70〜80% / 複数 20〜30%**（目標 複数38問）。既存バンクが偏っている場合は「本番試験を実施」時に調整確認あり
-   - バンク問題には SAP 4ドメインに対応する `category_id` を付与（既存分は status 呼び出しで埋め直し）
-   - 生成時は既存タイトル／問題文との類似を検品し、テーマ重複を抑制（シナリオ骨組みも拡充）
+3. 仕様メモ
+   - バンク目標件数 = `exam_question_count × 2`（例: 本番75問 → バンク150問）
+   - ドメイン比率・複数選択目安は `exam_blueprints` / `exam_blueprint_domains`（管理者シード。編集 UI は後続）
+   - ドメイン未設定の資格は「総合」1ドメインで目標件数まで生成
+   - `exam_question_count` 未設定の資格は生成不可（資格追加時に出題数を登録）
+   - メイン「本番試験を受ける」→ 試験問題が無ければ作成確認
+   - 1呼び出しあたり最大5問。途中失敗時も既存は残し、再実行で再開
+   - 画面文言は「試験問題」（内部概念は共有バンクのまま）
 
 ### 本番試験履歴タイトルの補正
 

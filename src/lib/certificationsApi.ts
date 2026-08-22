@@ -8,6 +8,7 @@ type CertFields = {
   choice_min: number | null;
   choice_max: number | null;
   answer_max: number | null;
+  exam_question_count: number | null;
 };
 
 type UserCertRow = {
@@ -30,6 +31,7 @@ function mapRow(row: UserCertRow): Certification | null {
     choiceMin: cert.choice_min,
     choiceMax: cert.choice_max,
     answerMax: cert.answer_max,
+    examQuestionCount: cert.exam_question_count,
   };
 }
 
@@ -68,7 +70,8 @@ export async function fetchCertifications(): Promise<Certification[]> {
         question_format,
         choice_min,
         choice_max,
-        answer_max
+        answer_max,
+        exam_question_count
       )
     `,
     )
@@ -91,6 +94,7 @@ export type CreateCertificationInput = {
   choiceMin: number | null;
   choiceMax: number | null;
   answerMax: number | null;
+  examQuestionCount: number | null;
 };
 
 export type ValidatedCertificationCandidate = {
@@ -101,6 +105,7 @@ export type ValidatedCertificationCandidate = {
   choiceMin: number | null;
   choiceMax: number | null;
   answerMax: number | null;
+  examQuestionCount: number | null;
 };
 
 type ValidateSuccess = {
@@ -113,6 +118,7 @@ type ValidateSuccess = {
     choice_min: number | null;
     choice_max: number | null;
     answer_max: number | null;
+    exam_question_count: number | null;
   };
 };
 
@@ -143,6 +149,7 @@ export async function validateCertificationQuery(
       choiceMin: payload.candidate.choice_min,
       choiceMax: payload.candidate.choice_max,
       answerMax: payload.candidate.answer_max,
+      examQuestionCount: payload.candidate.exam_question_count,
     };
   }
 
@@ -171,6 +178,7 @@ export async function createCertification(
     p_choice_min: input.choiceMin,
     p_choice_max: input.choiceMax,
     p_answer_max: input.answerMax,
+    p_exam_question_count: input.examQuestionCount,
   });
 
   if (error) {
@@ -187,6 +195,7 @@ export async function createCertification(
     choiceMin?: number | null;
     choiceMax?: number | null;
     answerMax?: number | null;
+    examQuestionCount?: number | null;
   };
 
   return {
@@ -198,6 +207,7 @@ export async function createCertification(
     choiceMin: row.choiceMin ?? input.choiceMin,
     choiceMax: row.choiceMax ?? input.choiceMax,
     answerMax: row.answerMax ?? input.answerMax,
+    examQuestionCount: row.examQuestionCount ?? input.examQuestionCount,
   };
 }
 
@@ -225,6 +235,7 @@ export async function renameCertification(
       choice_min: input.choiceMin,
       choice_max: input.choiceMax,
       answer_max: input.answerMax,
+      exam_question_count: input.examQuestionCount,
     })
     .eq('id', certificationId);
 

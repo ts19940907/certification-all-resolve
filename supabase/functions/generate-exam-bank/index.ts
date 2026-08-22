@@ -6,49 +6,17 @@ const corsHeaders = {
     'authorization, x-client-info, apikey, content-type',
 };
 
-/** SAP-C02: 150問 = 39 / 44 / 37 / 30（公式比率 26/29/25/20% に近似） */
-const SAP_DOMAINS = [
-  {
-    key: 'organizational_complexity',
-    label: 'Design Solutions for Organizational Complexity',
-    categoryName: '組織の複雑さへの設計',
-    weight: 26,
-    fullCount: 39,
-  },
-  {
-    key: 'new_solutions',
-    label: 'Design for New Solutions',
-    categoryName: '新規ソリューションの設計',
-    weight: 29,
-    fullCount: 44,
-  },
-  {
-    key: 'continuous_improvement',
-    label: 'Continuous Improvement for Existing Solutions',
-    categoryName: '既存ソリューションの継続的改善',
-    weight: 25,
-    fullCount: 37,
-  },
-  {
-    key: 'migration_modernization',
-    label: 'Accelerate Workload Migration and Modernization',
-    categoryName: '移行とモダナイゼーション',
-    weight: 20,
-    fullCount: 30,
-  },
-] as const;
-
-type DomainKey = (typeof SAP_DOMAINS)[number]['key'];
-type DomainMeta = (typeof SAP_DOMAINS)[number];
-
-const TARGET_TOTAL = SAP_DOMAINS.reduce((s, d) => s + d.fullCount, 0); // 150
 const BATCH_SIZE = 5;
-/** SAP-C02 目安: 複数選択 20〜30% → 中央付近の 25%（38問） */
-const MULTI_TARGET_TOTAL = 38;
-const MULTI_MIN_RATIO = 0.2;
-const MULTI_MAX_RATIO = 0.3;
 
-const SCENARIO_TEMPLATES = [
+/** SAP ドメインキー（シナリオテンプレ切替用。進捗は DB ブループリントから読む） */
+const SAP_DOMAIN_KEYS = new Set([
+  'organizational_complexity',
+  'new_solutions',
+  'continuous_improvement',
+  'migration_modernization',
+]);
+
+const SAP_SCENARIO_TEMPLATES = [
   'マルチアカウント構成と AWS Organizations のガバナンス（SCP / OU 設計）',
   'オンプレミス併用のハイブリッド接続（Direct Connect / VPN / Transit Gateway）',
   'マルチリージョンの災害対策（RPO/RTO 付き、データベース中心）',
@@ -74,6 +42,43 @@ const SCENARIO_TEMPLATES = [
   'コスト異常検知とタグ付けガバナンスの導入',
   'ゼロトラスト寄りの社内アクセス（VPN 代替 / Verified Access 等の現行サービス）',
 ] as const;
+
+const GENERIC_SCENARIO_TEMPLATES = [
+  'コストと運用負荷のバランスを取る既存システムの改善',
+  '高可用性と障害時の復旧要件を満たす新規設計',
+  'セキュリティ統制とコンプライアンスを含む導入計画',
+  'パフォーマンス目標を満たすデータ層・キャッシュ設計',
+  '段階的移行とカットオーバー時の整合性担保',
+  'マルチリージョン／災害対策（RPO/RTO 付き）',
+  '権限分離と監査ログの自動化',
+  'スケールアウトとステートレス化を含む Web 基盤',
+  'イベント駆動アーキテクチャの信頼性設計',
+  '既存構成の段階的モダナイゼーション',
+] as const;
+
+type DomainMeta = {
+  key: string;
+  label: string;
+  categoryName: string;
+  weight: number;
+  fullCount: number;
+};
+
+type MultiRatioConfig = {
+  multiMinRatio: number;
+  multiMaxRatio: number;
+  multiTargetRatio: number;
+  multiTargetTotal: number;
+};
+
+type ExamBankConfig = {
+  domains: DomainMeta[];
+  targetTotal: number;
+  multi: MultiRatioConfig | null;
+  promptExamLabel: string;
+  certName: string;
+  useSapScenarios: boolean;
+};
 
 type ChoiceDraft = {
   value: string;
@@ -146,18 +151,6 @@ async function callGeminiJson(
   return extractJsonObject(text);
 }
 
-function isSapCertification(name: string, examCode: string | null): boolean {
-  const code = (examCode ?? '').toUpperCase();
-  if (code.includes('SAP-C02') || code === 'SAP') return true;
-  const n = name.toLowerCase();
-  return (
-    (n.includes('solutions architect') && n.includes('professional')) ||
-    (n.includes('ソリューションアーキテクト') &&
-      n.includes('プロフェッショナル')) ||
-    n.includes('sap-c02')
-  );
-}
-
 function normalizeDraft(raw: unknown): QuestionDraft {
   const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<
     string,
@@ -200,10 +193,7 @@ function localValidate(draft: QuestionDraft, mode: AnswerMode): string[] {
   }
   if (draft.question.length < 40) issues.push('問題文が短すぎます');
   if (draft.title.length < 8) issues.push('タイトルが短すぎます');
-  if (
-    /練習問題|模擬問題|sap-?c02\s*#|通し番号/i.test(draft.title) ||
-    /^aws\s*sap/i.test(draft.title.trim())
-  ) {
+  if (/練習問題|模擬問題|通し番号/i.test(draft.title)) {
     issues.push(
       'タイトルはシナリオ内容を表す具体名にしてください（練習問題番号形式は不可）',
     );
@@ -288,7 +278,7 @@ async function loadExistingFingerprints(
     .select('title, question')
     .eq('certification_id', certificationId)
     .is('user_id', null);
-  if (error) throw new Error('既存バンクの取得に失敗しました');
+  if (error) throw new Error('既存試験問題の取得に失敗しました');
   return {
     titles: (data ?? []).map((r) => String(r.title ?? '')),
     questions: (data ?? []).map((r) => String(r.question ?? '')),
@@ -296,10 +286,12 @@ async function loadExistingFingerprints(
 }
 
 function pickAnswerMode(args: {
+  multi: MultiRatioConfig | null;
   multiHave: number;
   remainingSlots: number;
 }): AnswerMode {
-  const multiStillNeeded = MULTI_TARGET_TOTAL - args.multiHave;
+  if (!args.multi) return 'single';
+  const multiStillNeeded = args.multi.multiTargetTotal - args.multiHave;
   if (multiStillNeeded <= 0) return 'single';
   if (args.remainingSlots <= 0) return 'single';
   if (multiStillNeeded >= args.remainingSlots) return 'multi';
@@ -309,6 +301,7 @@ function pickAnswerMode(args: {
 }
 
 function buildGeneratePrompt(args: {
+  promptExamLabel: string;
   certName: string;
   domain: DomainMeta;
   scenario: string;
@@ -344,18 +337,18 @@ function buildGeneratePrompt(args: {
 
   const avoidBlock =
     args.avoidTitles.length > 0
-      ? `\n既存バンクに既にあるテーマ（これらと題材・構成が似た問題は禁止）:\n${args.avoidTitles
+      ? `\n既存の試験問題に既にあるテーマ（これらと題材・構成が似た問題は禁止）:\n${args.avoidTitles
           .slice(0, 40)
           .map((t, i) => `${i + 1}. ${t}`)
           .join('\n')}\n`
       : '';
 
-  return `あなたは AWS Certified Solutions Architect - Professional (SAP-C02) の問題作成者です。
-公式ドメイン比率に沿ったオリジナルの練習問題を1問だけ作成してください。
+  return `あなたは ${args.promptExamLabel} の問題作成者です。
+試験ドメイン比率に沿ったオリジナルの練習問題を1問だけ作成してください。
 公式過去問の複製は禁止。一般的な設計判断を問うシナリオ問題にします。
 
 資格: ${args.certName}
-ドメイン: ${args.domain.label} (${args.domain.key}, 公式比率 ${args.domain.weight}%)
+ドメイン: ${args.domain.label} (${args.domain.key}, 比率 ${args.domain.weight}%)
 シナリオ骨組み: ${args.scenario}
 同一ドメイン内の通し番号: ${args.indexInDomain}
 解答形式: ${args.answerMode === 'multi' ? '複数選択' : '単一選択'}
@@ -369,7 +362,7 @@ ${modeRules}
 - 各選択肢に reason（正解理由 or 不正解理由）を必ず付ける
 - 非推奨の旧サービス名に依存しない（現行の主要サービスを使う）
 - 既存問題との重複禁止（同じ企業状況の言い換え、同じ構成パターンの使い回し不可）
-- タイトルは内容が分かる具体名（「練習問題」「模擬問題」「SAP-C02 #N」形式は禁止）
+- タイトルは内容が分かる具体名（「練習問題」「模擬問題」形式は禁止）
 - 冒頭の定型文（「ある企業が…」「大規模なエンタープライズ企業が…」）を毎回同じにしない
 - 制約条件（RPO/RTO、アカウント数、サービス組み合わせ、失敗時の要件など）を既存と差別化する
 
@@ -384,6 +377,7 @@ ${modeRules}
 
 function buildReviewPrompt(
   draft: QuestionDraft,
+  promptExamLabel: string,
   domainLabel: string,
   answerMode: AnswerMode,
   avoidTitles: string[],
@@ -401,7 +395,7 @@ function buildReviewPrompt(
           .join('\n')}\n`
       : '';
 
-  return `あなたは SAP-C02 問題の検品担当です。生成用とは別視点で査読してください。
+  return `あなたは ${promptExamLabel} 問題の検品担当です。生成用とは別視点で査読してください。
 
 ドメイン: ${domainLabel}
 解答形式: ${answerMode === 'multi' ? '複数選択（正解2つ）' : '単一選択'}
@@ -448,10 +442,91 @@ function parseReview(raw: unknown): {
   return { pass, issues, revised };
 }
 
+async function loadExamBankConfig(
+  admin: AdminClient,
+  certificationId: string,
+  certName: string,
+  examQuestionCount: number,
+): Promise<ExamBankConfig> {
+  const targetTotal = examQuestionCount * 2;
+
+  const { data: blueprint, error: bpError } = await admin
+    .from('exam_blueprints')
+    .select(
+      'multi_min_ratio, multi_max_ratio, multi_target_ratio, prompt_exam_label',
+    )
+    .eq('certification_id', certificationId)
+    .maybeSingle();
+  if (bpError) throw new Error('試験ブループリントの取得に失敗しました');
+
+  const { data: domainRows, error: domainError } = await admin
+    .from('exam_blueprint_domains')
+    .select(
+      'domain_key, label, category_name, weight_percent, target_count, sort_order',
+    )
+    .eq('certification_id', certificationId)
+    .order('sort_order', { ascending: true });
+  if (domainError) throw new Error('試験ドメインの取得に失敗しました');
+
+  let domains: DomainMeta[];
+  if (!domainRows || domainRows.length === 0) {
+    domains = [
+      {
+        key: 'general',
+        label: '総合',
+        categoryName: '総合',
+        weight: 100,
+        fullCount: targetTotal,
+      },
+    ];
+  } else {
+    domains = domainRows.map((row) => ({
+      key: String(row.domain_key),
+      label: String(row.label),
+      categoryName: String(row.category_name),
+      weight: Number(row.weight_percent) || 0,
+      fullCount: Number(row.target_count) || 0,
+    }));
+  }
+
+  let multi: MultiRatioConfig | null = null;
+  if (
+    blueprint &&
+    blueprint.multi_min_ratio != null &&
+    blueprint.multi_max_ratio != null &&
+    blueprint.multi_target_ratio != null
+  ) {
+    const multiTargetRatio = Number(blueprint.multi_target_ratio);
+    multi = {
+      multiMinRatio: Number(blueprint.multi_min_ratio),
+      multiMaxRatio: Number(blueprint.multi_max_ratio),
+      multiTargetRatio,
+      multiTargetTotal: Math.round(targetTotal * multiTargetRatio),
+    };
+  }
+
+  const promptExamLabel =
+    (blueprint?.prompt_exam_label && String(blueprint.prompt_exam_label).trim()) ||
+    certName;
+
+  const useSapScenarios =
+    domains.length > 0 && domains.every((d) => SAP_DOMAIN_KEYS.has(d.key));
+
+  return {
+    domains,
+    targetTotal,
+    multi,
+    promptExamLabel,
+    certName,
+    useSapScenarios,
+  };
+}
+
 async function ensureDomainCategories(
   admin: AdminClient,
   certificationId: string,
-): Promise<Record<DomainKey, string>> {
+  domains: DomainMeta[],
+): Promise<Record<string, string>> {
   const { data: existing, error } = await admin
     .from('certification_categories')
     .select('id, name, sort_order')
@@ -466,8 +541,8 @@ async function ensureDomainCategories(
     maxSort = Math.max(maxSort, Number(row.sort_order) || 0);
   }
 
-  const map = {} as Record<DomainKey, string>;
-  for (const domain of SAP_DOMAINS) {
+  const map: Record<string, string> = {};
+  for (const domain of domains) {
     let id = byName.get(domain.categoryName);
     if (!id) {
       maxSort += 1;
@@ -494,7 +569,7 @@ async function ensureDomainCategories(
 async function backfillBankCategories(
   admin: AdminClient,
   certificationId: string,
-  categoryByDomain: Record<DomainKey, string>,
+  categoryByDomain: Record<string, string>,
 ): Promise<number> {
   const { data: rows, error } = await admin
     .from('examples')
@@ -502,11 +577,11 @@ async function backfillBankCategories(
     .eq('certification_id', certificationId)
     .is('user_id', null)
     .is('category_id', null);
-  if (error) throw new Error('カテゴリ未設定のバンク問題の取得に失敗しました');
+  if (error) throw new Error('カテゴリ未設定の試験問題の取得に失敗しました');
 
   let updated = 0;
   for (const row of rows ?? []) {
-    const domain = row.domain as DomainKey | null;
+    const domain = row.domain as string | null;
     if (!domain || !(domain in categoryByDomain)) continue;
     const { error: updError } = await admin
       .from('examples')
@@ -517,13 +592,16 @@ async function backfillBankCategories(
   return updated;
 }
 
-function buildProgress(counts: Record<DomainKey, number>) {
-  const progress = SAP_DOMAINS.map((d) => ({
+function buildProgress(
+  domains: DomainMeta[],
+  counts: Record<string, number>,
+) {
+  const progress = domains.map((d) => ({
     domain: d.key,
     label: d.label,
-    have: counts[d.key],
+    have: counts[d.key] ?? 0,
     need: d.fullCount,
-    remaining: Math.max(0, d.fullCount - counts[d.key]),
+    remaining: Math.max(0, d.fullCount - (counts[d.key] ?? 0)),
   }));
   const domainHave = progress.reduce((s, p) => s + p.have, 0);
   const domainRemaining = progress.reduce((s, p) => s + p.remaining, 0);
@@ -535,7 +613,7 @@ function buildProgress(counts: Record<DomainKey, number>) {
 }
 
 type BankInventory = {
-  counts: Record<DomainKey, number>;
+  counts: Record<string, number>;
   /** 共有バンクの実件数（domain の有無に依存しない） */
   totalHave: number;
   unknownDomain: number;
@@ -547,23 +625,22 @@ type BankInventory = {
 async function loadBankInventory(
   admin: AdminClient,
   certificationId: string,
+  domains: DomainMeta[],
+  targetTotal: number,
 ): Promise<BankInventory> {
   const { data: bankRows, error, count } = await admin
     .from('examples')
     .select('id, domain', { count: 'exact' })
     .eq('certification_id', certificationId)
     .is('user_id', null);
-  if (error) throw new Error('共有バンクの取得に失敗しました');
+  if (error) throw new Error('試験問題の取得に失敗しました');
 
-  const counts: Record<DomainKey, number> = {
-    organizational_complexity: 0,
-    new_solutions: 0,
-    continuous_improvement: 0,
-    migration_modernization: 0,
-  };
+  const counts: Record<string, number> = {};
+  for (const d of domains) counts[d.key] = 0;
+
   let unknownDomain = 0;
   for (const row of bankRows ?? []) {
-    const d = row.domain as DomainKey | null;
+    const d = row.domain as string | null;
     if (d && d in counts) counts[d] += 1;
     else unknownDomain += 1;
   }
@@ -574,24 +651,15 @@ async function loadBankInventory(
       ? count
       : (bankRows ?? []).length;
 
-  const { progress, domainRemaining } = buildProgress(counts);
+  const { progress, domainRemaining } = buildProgress(domains, counts);
   return {
     counts,
     totalHave,
     unknownDomain,
     progress,
     domainRemaining,
-    totalRemaining: Math.max(0, TARGET_TOTAL - totalHave),
+    totalRemaining: Math.max(0, targetTotal - totalHave),
   };
-}
-
-/** @deprecated alias — 互換用 */
-async function loadCounts(
-  admin: AdminClient,
-  certificationId: string,
-): Promise<Record<DomainKey, number>> {
-  const inventory = await loadBankInventory(admin, certificationId);
-  return inventory.counts;
 }
 
 async function countAnswerTypes(
@@ -608,7 +676,7 @@ async function countAnswerTypes(
     .select('id')
     .eq('certification_id', certificationId)
     .is('user_id', null);
-  if (error) throw new Error('共有バンクの取得に失敗しました');
+  if (error) throw new Error('試験問題の取得に失敗しました');
 
   const ids = (bankRows ?? []).map((r) => r.id as string);
   if (ids.length === 0) {
@@ -645,21 +713,37 @@ async function countAnswerTypes(
   };
 }
 
-function answerTypeSummary(single: number, multi: number) {
+function answerTypeSummary(
+  single: number,
+  multi: number,
+  multiConfig: MultiRatioConfig | null,
+) {
   const total = single + multi;
   const multiRatio = total > 0 ? multi / total : 0;
+  if (!multiConfig) {
+    return {
+      single,
+      multi,
+      total,
+      multiRatio,
+      multiTarget: 0,
+      multiMinRatio: null as number | null,
+      multiMaxRatio: null as number | null,
+      inTargetRange: true,
+    };
+  }
   const inRange =
     total > 0 &&
-    multiRatio >= MULTI_MIN_RATIO &&
-    multiRatio <= MULTI_MAX_RATIO;
+    multiRatio >= multiConfig.multiMinRatio &&
+    multiRatio <= multiConfig.multiMaxRatio;
   return {
     single,
     multi,
     total,
     multiRatio,
-    multiTarget: MULTI_TARGET_TOTAL,
-    multiMinRatio: MULTI_MIN_RATIO,
-    multiMaxRatio: MULTI_MAX_RATIO,
+    multiTarget: multiConfig.multiTargetTotal,
+    multiMinRatio: multiConfig.multiMinRatio,
+    multiMaxRatio: multiConfig.multiMaxRatio,
     inTargetRange: inRange,
   };
 }
@@ -668,9 +752,19 @@ function answerTypeSummary(single: number, multi: number) {
 async function rebalanceForMulti(
   admin: AdminClient,
   certificationId: string,
+  config: ExamBankConfig,
 ): Promise<{ deleted: number; multiHave: number; singleHave: number }> {
+  if (!config.multi) {
+    const types = await countAnswerTypes(admin, certificationId);
+    return {
+      deleted: 0,
+      multiHave: types.multi,
+      singleHave: types.single,
+    };
+  }
+
   const types = await countAnswerTypes(admin, certificationId);
-  const multiNeed = Math.max(0, MULTI_TARGET_TOTAL - types.multi);
+  const multiNeed = Math.max(0, config.multi.multiTargetTotal - types.multi);
   if (multiNeed <= 0 || types.singleIds.length === 0) {
     return {
       deleted: 0,
@@ -678,6 +772,8 @@ async function rebalanceForMulti(
       singleHave: types.single,
     };
   }
+
+  const domainKeys = new Set(config.domains.map((d) => d.key));
 
   // ドメイン偏りを抑えるため、単一選択をドメイン別に分散削除
   const { data: singleRows, error: singleMetaError } = await admin
@@ -693,7 +789,7 @@ async function rebalanceForMulti(
   for (const row of singleRows ?? []) {
     const id = row.id as string;
     const d = row.domain as string | null;
-    if (d && SAP_DOMAINS.some((x) => x.key === d)) {
+    if (d && domainKeys.has(d)) {
       const list = byDomain.get(d) ?? [];
       list.push(id);
       byDomain.set(d, list);
@@ -759,7 +855,7 @@ async function resetBank(
     .select('id')
     .eq('certification_id', certificationId)
     .is('user_id', null);
-  if (error) throw new Error('共有バンクの取得に失敗しました');
+  if (error) throw new Error('試験問題の取得に失敗しました');
 
   const ids = (rows ?? []).map((r) => r.id as string);
   if (ids.length === 0) {
@@ -779,24 +875,43 @@ async function resetBank(
     .from('examples')
     .delete()
     .in('id', ids);
-  if (delError) throw new Error('共有バンクの削除に失敗しました');
+  if (delError) throw new Error('試験問題の削除に失敗しました');
 
   await admin
     .from('certifications')
     .update({
       exam_bank_status: 'none',
-      exam_bank_message: '共有バンクをクリアしました',
+      exam_bank_message: '試験問題をクリアしました',
     })
     .eq('id', certificationId);
 
   return ids.length;
 }
 
+function pickScenario(
+  config: ExamBankConfig,
+  domainMeta: DomainMeta,
+  indexInDomain: number,
+  totalHave: number,
+  attempt: number,
+): string {
+  const templates = config.useSapScenarios
+    ? SAP_SCENARIO_TEMPLATES
+    : GENERIC_SCENARIO_TEMPLATES;
+  return templates[
+    (totalHave * 3 +
+      indexInDomain * 5 +
+      domainMeta.fullCount +
+      attempt * 11) %
+      templates.length
+  ]!;
+}
+
 async function createOneBankQuestion(args: {
   admin: AdminClient;
   geminiKey: string;
   geminiModel: string;
-  certName: string;
+  config: ExamBankConfig;
   certificationId: string;
   domainMeta: DomainMeta;
   categoryId: string;
@@ -811,18 +926,18 @@ async function createOneBankQuestion(args: {
   let lastFailMessage = '生成に失敗しました';
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const scenario =
-      SCENARIO_TEMPLATES[
-        (args.totalHave * 3 +
-          args.indexInDomain * 5 +
-          args.domainMeta.fullCount +
-          attempt * 11) %
-          SCENARIO_TEMPLATES.length
-      ]!;
+    const scenario = pickScenario(
+      args.config,
+      args.domainMeta,
+      args.indexInDomain,
+      args.totalHave,
+      attempt,
+    );
 
     const buildPrompt = (extra = '') =>
       buildGeneratePrompt({
-        certName: args.certName,
+        promptExamLabel: args.config.promptExamLabel,
+        certName: args.config.certName,
         domain: args.domainMeta,
         scenario,
         indexInDomain: args.indexInDomain,
@@ -871,6 +986,7 @@ async function createOneBankQuestion(args: {
           args.geminiModel,
           buildReviewPrompt(
             draft,
+            args.config.promptExamLabel,
             args.domainMeta.label,
             answerMode,
             avoidTitles,
@@ -1054,7 +1170,9 @@ Deno.serve(async (req) => {
 
     const { data: cert, error: certError } = await admin
       .from('certifications')
-      .select('id, name, exam_code, exam_bank_status, exam_bank_message')
+      .select(
+        'id, name, exam_code, exam_question_count, exam_bank_status, exam_bank_message',
+      )
       .eq('id', certificationId)
       .single();
 
@@ -1062,25 +1180,24 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, error: '資格が見つかりません' }, 404);
     }
 
-    if (
-      !isSapCertification(cert.name as string, cert.exam_code as string | null)
-    ) {
+    const examQuestionCount = Number(cert.exam_question_count);
+    if (!Number.isFinite(examQuestionCount) || examQuestionCount <= 0) {
       return jsonResponse(
         {
           ok: false,
           error:
-            '共有バンク生成は AWS Solutions Architect Professional (SAP-C02) 向けです。',
+            '本番試験の出題数が未登録です。資格設定で出題数を登録してください。',
         },
         400,
       );
     }
 
-    if (!cert.exam_code) {
-      await admin
-        .from('certifications')
-        .update({ exam_code: 'SAP-C02' })
-        .eq('id', certificationId);
-    }
+    const config = await loadExamBankConfig(
+      admin,
+      certificationId,
+      cert.name as string,
+      examQuestionCount,
+    );
 
     if (mode === 'reset') {
       const deleted = await resetBank(admin, certificationId);
@@ -1090,11 +1207,11 @@ Deno.serve(async (req) => {
         deleted,
         status: 'none',
         totalHave: 0,
-        totalRemaining: TARGET_TOTAL,
+        totalRemaining: config.targetTotal,
         complete: false,
         created: 0,
-        answerTypes: answerTypeSummary(0, 0),
-        progress: SAP_DOMAINS.map((d) => ({
+        answerTypes: answerTypeSummary(0, 0, config.multi),
+        progress: config.domains.map((d) => ({
           domain: d.key,
           label: d.label,
           have: 0,
@@ -1105,8 +1222,13 @@ Deno.serve(async (req) => {
     }
 
     if (mode === 'rebalance_multi') {
-      const result = await rebalanceForMulti(admin, certificationId);
-      const inventory = await loadBankInventory(admin, certificationId);
+      const result = await rebalanceForMulti(admin, certificationId, config);
+      const inventory = await loadBankInventory(
+        admin,
+        certificationId,
+        config.domains,
+        config.targetTotal,
+      );
       const types = await countAnswerTypes(admin, certificationId);
       return jsonResponse({
         ok: true,
@@ -1114,20 +1236,23 @@ Deno.serve(async (req) => {
         deleted: result.deleted,
         totalHave: inventory.totalHave,
         totalRemaining: inventory.totalRemaining,
-        targetTotal: TARGET_TOTAL,
+        targetTotal: config.targetTotal,
         progress: inventory.progress,
-        answerTypes: answerTypeSummary(types.single, types.multi),
+        answerTypes: answerTypeSummary(types.single, types.multi, config.multi),
         status: inventory.totalRemaining > 0 ? 'generating' : 'ready',
         message:
           result.deleted > 0
-            ? `複数選択の枠を確保するため単一選択を ${result.deleted} 問削除しました（現在 ${inventory.totalHave}/${TARGET_TOTAL}）。生成を再開してください。`
-            : '複数選択の比率は目標範囲です（削除なし）。',
+            ? `複数選択の枠を確保するため単一選択を ${result.deleted} 問削除しました（現在 ${inventory.totalHave}/${config.targetTotal}）。生成を再開してください。`
+            : config.multi
+              ? '複数選択の比率は目標範囲です（削除なし）。'
+              : 'この資格は複数選択比率の目標が未設定です（削除なし）。',
       });
     }
 
     const categoryByDomain = await ensureDomainCategories(
       admin,
       certificationId,
+      config.domains,
     );
     const backfilled = await backfillBankCategories(
       admin,
@@ -1135,9 +1260,18 @@ Deno.serve(async (req) => {
       categoryByDomain,
     );
 
-    let inventory = await loadBankInventory(admin, certificationId);
+    let inventory = await loadBankInventory(
+      admin,
+      certificationId,
+      config.domains,
+      config.targetTotal,
+    );
     let typeCounts = await countAnswerTypes(admin, certificationId);
-    let answerTypes = answerTypeSummary(typeCounts.single, typeCounts.multi);
+    let answerTypes = answerTypeSummary(
+      typeCounts.single,
+      typeCounts.multi,
+      config.multi,
+    );
 
     if (mode === 'status') {
       return jsonResponse({
@@ -1147,7 +1281,7 @@ Deno.serve(async (req) => {
         message: cert.exam_bank_message,
         totalHave: inventory.totalHave,
         totalRemaining: inventory.totalRemaining,
-        targetTotal: TARGET_TOTAL,
+        targetTotal: config.targetTotal,
         batchSize: BATCH_SIZE,
         progress: inventory.progress,
         answerTypes,
@@ -1162,7 +1296,7 @@ Deno.serve(async (req) => {
         .from('certifications')
         .update({
           exam_bank_status: 'ready',
-          exam_bank_message: `共有バンク ${inventory.totalHave} 問が利用可能です（単一 ${answerTypes.single} / 複数 ${answerTypes.multi}）`,
+          exam_bank_message: `試験問題 ${inventory.totalHave} 問が利用可能です（単一 ${answerTypes.single} / 複数 ${answerTypes.multi}）`,
         })
         .eq('id', certificationId);
       return jsonResponse({
@@ -1171,7 +1305,7 @@ Deno.serve(async (req) => {
         created: 0,
         totalHave: inventory.totalHave,
         totalRemaining: 0,
-        targetTotal: TARGET_TOTAL,
+        targetTotal: config.targetTotal,
         progress: inventory.progress,
         answerTypes,
         status: 'ready',
@@ -1182,7 +1316,7 @@ Deno.serve(async (req) => {
       .from('certifications')
       .update({
         exam_bank_status: 'generating',
-        exam_bank_message: `共有バンク生成中（${inventory.totalHave}/${TARGET_TOTAL}）`,
+        exam_bank_message: `試験問題生成中（${inventory.totalHave}/${config.targetTotal}）`,
       })
       .eq('id', certificationId);
 
@@ -1197,7 +1331,12 @@ Deno.serve(async (req) => {
     let consecutiveRetryableFailures = 0;
 
     while (created < BATCH_SIZE) {
-      inventory = await loadBankInventory(admin, certificationId);
+      inventory = await loadBankInventory(
+        admin,
+        certificationId,
+        config.domains,
+        config.targetTotal,
+      );
       if (inventory.totalRemaining <= 0) break;
 
       // ドメイン不足があれば優先。なければ（件数不足のみ）最少ドメインへ補充
@@ -1206,8 +1345,10 @@ Deno.serve(async (req) => {
         next = [...inventory.progress].sort((a, b) => a.have - b.have)[0];
       }
       if (!next) break;
-      const domainMeta = SAP_DOMAINS.find((d) => d.key === next.domain)!;
+      const domainMeta = config.domains.find((d) => d.key === next.domain);
+      if (!domainMeta) break;
       const answerMode = pickAnswerMode({
+        multi: config.multi,
         multiHave,
         remainingSlots: inventory.totalRemaining,
       });
@@ -1217,7 +1358,7 @@ Deno.serve(async (req) => {
           admin,
           geminiKey,
           geminiModel,
-          certName: cert.name as string,
+          config,
           certificationId,
           domainMeta,
           categoryId: categoryByDomain[domainMeta.key],
@@ -1247,9 +1388,18 @@ Deno.serve(async (req) => {
       }
     }
 
-    inventory = await loadBankInventory(admin, certificationId);
+    inventory = await loadBankInventory(
+      admin,
+      certificationId,
+      config.domains,
+      config.targetTotal,
+    );
     typeCounts = await countAnswerTypes(admin, certificationId);
-    answerTypes = answerTypeSummary(typeCounts.single, typeCounts.multi);
+    answerTypes = answerTypeSummary(
+      typeCounts.single,
+      typeCounts.multi,
+      config.multi,
+    );
     const complete = inventory.totalRemaining <= 0;
 
     if (created === 0 && lastError) {
@@ -1267,7 +1417,7 @@ Deno.serve(async (req) => {
           created: 0,
           totalHave: inventory.totalHave,
           totalRemaining: inventory.totalRemaining,
-          targetTotal: TARGET_TOTAL,
+          targetTotal: config.targetTotal,
           progress: inventory.progress,
           answerTypes,
         },
@@ -1280,8 +1430,8 @@ Deno.serve(async (req) => {
       .update({
         exam_bank_status: complete ? 'ready' : 'generating',
         exam_bank_message: complete
-          ? `共有バンク ${inventory.totalHave} 問が利用可能です（単一 ${answerTypes.single} / 複数 ${answerTypes.multi}）`
-          : `共有バンク生成中（${inventory.totalHave}/${TARGET_TOTAL}）` +
+          ? `試験問題 ${inventory.totalHave} 問が利用可能です（単一 ${answerTypes.single} / 複数 ${answerTypes.multi}）`
+          : `試験問題生成中（${inventory.totalHave}/${config.targetTotal}）` +
             (lastError ? ` / 直近エラー: ${lastError}` : ''),
       })
       .eq('id', certificationId);
@@ -1293,7 +1443,7 @@ Deno.serve(async (req) => {
       exampleIds: createdIds,
       totalHave: inventory.totalHave,
       totalRemaining: inventory.totalRemaining,
-      targetTotal: TARGET_TOTAL,
+      targetTotal: config.targetTotal,
       batchSize: BATCH_SIZE,
       progress: inventory.progress,
       answerTypes,
