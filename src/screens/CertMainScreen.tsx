@@ -323,7 +323,7 @@ export function CertMainScreen({
       const unimported = await filterUnimportedBankExampleIds(payload.exampleIds);
       if (unimported.length === 0) {
         setNoticeMessage(
-          '試験で出た共有バンク問題は、すでに例題一覧へ取り込まれています。',
+          '試験で出た問題は、すでに例題一覧へ取り込まれています。',
         );
         return;
       }
@@ -344,12 +344,12 @@ export function CertMainScreen({
       await loadExamples();
       setNoticeMessage(
         imported > 0
-          ? `共有バンクから ${imported} 問を例題一覧に取り込みました。`
+          ? `試験問題から ${imported} 問を例題一覧に取り込みました。`
           : '取り込める未登録の問題はありませんでした。',
       );
     } catch (error) {
       setNoticeMessage(
-        getErrorMessage(error, '共有バンクの取り込みに失敗しました。'),
+        getErrorMessage(error, '試験問題の取り込みに失敗しました。'),
       );
     } finally {
       setBankImportBusy(false);
@@ -481,7 +481,7 @@ export function CertMainScreen({
         EXAM_QUESTION_COUNT,
       );
       if (ids.length === 0) {
-        setNoticeMessage('共有バンクに問題がありません。');
+        setNoticeMessage('試験問題がありません。');
         return;
       }
       setExamLobbyIds(ids);
@@ -542,7 +542,7 @@ export function CertMainScreen({
       setNoticeMessage(
         getExamBankErrorMessage(
           error,
-          '共有バンクの状態確認に失敗しました。',
+          '試験問題の状態確認に失敗しました。',
         ),
       );
     } finally {
@@ -596,7 +596,7 @@ export function CertMainScreen({
   const handleConfirmGenerateBank = async () => {
     if (examBankBusy) return;
     setExamBankBusy(true);
-    setExamBankProgressText('共有バンクを準備しています…');
+    setExamBankProgressText('試験問題を準備しています…');
     try {
       const status = await fetchExamBankStatus(certification.id);
 
@@ -636,7 +636,7 @@ export function CertMainScreen({
     } catch (error) {
       setExamBankProgressText(null);
       setNoticeMessage(
-        getExamBankErrorMessage(error, '共有バンクの生成に失敗しました。'),
+        getExamBankErrorMessage(error, '試験問題の生成に失敗しました。'),
       );
     } finally {
       setExamBankBusy(false);
@@ -1740,7 +1740,7 @@ export function CertMainScreen({
           <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
             <Text style={styles.modalTitle}>複数選択の比率を調整しますか？</Text>
             <Text style={styles.modalLead}>
-              現行バンクは単一選択に偏っている可能性があります。単一選択を一部削除し、複数選択（正解2つ）を再生成して SAP 目安（複数
+              現行の試験問題は単一選択に偏っている可能性があります。単一選択を一部削除し、複数選択（正解2つ）を再生成して SAP 目安（複数
               20〜30%）に近づけます。
             </Text>
             {examBankProgressText ? (
@@ -1802,9 +1802,9 @@ export function CertMainScreen({
             }}
           />
           <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
-            <Text style={styles.modalTitle}>共有バンクを作成しますか？</Text>
+            <Text style={styles.modalTitle}>試験問題を作成しますか？</Text>
             <Text style={styles.modalLead}>
-              AWS SAP 向け共有バンク（150問）をAIで生成します。ドメイン比率は公式ガイドに沿い、1回あたり最大5問ずつ作成します。途中で止まっても既存の問題は残し、続きから再開できます。完了まで時間がかかります。
+              AWS SAP 向け試験問題（150問）をAIで生成します。ドメイン比率は公式ガイドに沿い、1回あたり最大5問ずつ作成します。途中で止まっても既存の問題は残し、続きから再開できます。完了まで時間がかかります。
             </Text>
             {examBankProgressText ? (
               <Text style={styles.modalLead}>{examBankProgressText}</Text>
@@ -2275,9 +2275,9 @@ export function CertMainScreen({
             }}
           />
           <View style={[styles.modalCard, isWide && styles.modalCardWide]}>
-            <Text style={styles.modalTitle}>共有バンクを取り込みますか？</Text>
+            <Text style={styles.modalTitle}>試験問題を取り込みますか？</Text>
             <Text style={styles.modalLead}>
-              今回の試験で出た共有バンク問題のうち、まだ例題一覧にないものが{' '}
+              今回の試験で出た問題のうち、まだ例題一覧にないものが{' '}
               {bankImportIds?.length ?? 0}{' '}
               問あります。例題一覧へ取り込みますか？（設定で次回以降の確認表示をオフにもできます）
             </Text>

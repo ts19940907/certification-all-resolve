@@ -256,9 +256,9 @@ export function CertSettingScreen({
             ) : null}
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>共有バンク</Text>
+              <Text style={styles.sectionTitle}>試験問題</Text>
               <Text style={styles.sectionLead}>
-                未取り込みの共有バンク問題があるとき、模擬試験の終了後に取り込み確認を出すかどうかを選べます。
+                未取り込みの試験問題があるとき、模擬試験の終了後に取り込み確認を出すかどうかを選べます。
               </Text>
               <View style={styles.switchRow}>
                 <View style={styles.switchCopy}>

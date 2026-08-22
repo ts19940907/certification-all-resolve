@@ -208,7 +208,7 @@ export async function renameCertification(
   const canRename = await canRenameCertification(certificationId);
   if (!canRename) {
     throw new Error(
-      '例題・履歴がある、共有バンクがある、または他のユーザーが利用中の資格は改名できません。',
+      '例題・履歴がある、試験問題がある、または他のユーザーが利用中の資格は改名できません。',
     );
   }
 

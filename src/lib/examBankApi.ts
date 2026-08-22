@@ -100,24 +100,24 @@ async function readFunctionsErrorBody(error: unknown): Promise<EdgeFail | null> 
 
 function mapInvokeTransportError(error: unknown): string {
   if (error instanceof FunctionsFetchError) {
-    return '共有バンク用のサーバー関数に接続できませんでした。ネットワークを確認して再試行してください。';
+    return '試験問題用のサーバー関数に接続できませんでした。ネットワークを確認して再試行してください。';
   }
   if (error instanceof FunctionsRelayError) {
-    return '共有バンク用のサーバー関数への中継に失敗しました。しばらくしてから再試行してください。';
+    return '試験問題用のサーバー関数への中継に失敗しました。しばらくしてから再試行してください。';
   }
   if (error instanceof FunctionsHttpError) {
-    return '共有バンク生成でサーバーエラーが発生しました。再試行で続きから再開できます。';
+    return '試験問題の生成でサーバーエラーが発生しました。再試行で続きから再開できます。';
   }
   if (error instanceof Error) {
     if (error.message.includes('Failed to send')) {
-      return '共有バンク用のサーバー関数に接続できませんでした。ログイン状態とネットワークを確認し、ページを再読み込みして再試行してください。';
+      return '試験問題用のサーバー関数に接続できませんでした。ログイン状態とネットワークを確認し、ページを再読み込みして再試行してください。';
     }
     if (error.message.includes('non-2xx')) {
-      return '共有バンク生成でサーバーエラーが発生しました。再試行で続きから再開できます。';
+      return '試験問題の生成でサーバーエラーが発生しました。再試行で続きから再開できます。';
     }
     return error.message;
   }
-  return '共有バンク処理に失敗しました';
+  return '試験問題の処理に失敗しました';
 }
 
 async function invokeExamBank(
@@ -131,7 +131,7 @@ async function invokeExamBank(
   // non-2xx でも data に JSON が入ることがある
   if (data && typeof data === 'object' && (data as EdgeFail).ok === false) {
     throw new Error(
-      formatEdgeFail(data as EdgeFail, '共有バンク処理に失敗しました'),
+      formatEdgeFail(data as EdgeFail, '試験問題の処理に失敗しました'),
     );
   }
 
@@ -153,7 +153,7 @@ async function invokeExamBank(
   const payload = data as EdgeOk | EdgeFail;
   if (!payload || payload.ok !== true) {
     throw new Error(
-      formatEdgeFail(payload as EdgeFail, '共有バンク処理に失敗しました'),
+      formatEdgeFail(payload as EdgeFail, '試験問題の処理に失敗しました'),
     );
   }
   return payload;
@@ -253,7 +253,7 @@ export async function runExamBankFullGeneration(
     }
   }
   if (!last) {
-    throw new Error('共有バンク生成を開始できませんでした');
+    throw new Error('試験問題の生成を開始できませんでした');
   }
   return last;
 }
